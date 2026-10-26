@@ -479,6 +479,12 @@ def build_corpus(
         for i, (was, now) in enumerate(zip(before, keep)):
             if was and not now:
                 source_stats[owner[i]]["balance"] += 1
+    for name, stats in source_stats.items():
+        if stats["duplicate_id"]:
+            warnings.append(
+                f"{name}: {stats['duplicate_id']} records dropped for reusing an id; "
+                "ids must be unique, so this is probably a loader bug"
+            )
     for w in warnings:
         log.warning("%s", w)
 

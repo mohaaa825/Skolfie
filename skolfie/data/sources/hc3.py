@@ -84,7 +84,6 @@ DOMAIN_MAP = {
 
 HUMAN_KEYS = ("human_answers",)
 AI_KEYS = ("chatgpt_answers",)
-ID_KEYS = ("id", "index")
 
 _SPACE_BEFORE = re.compile(r"[ \t]+([.,;:!?%)\]}])")
 _SPACE_AFTER = re.compile(r"([(\[{])[ \t]+")
@@ -157,9 +156,10 @@ def load(raw_dir: Path, download: bool = True) -> Iterator[Record]:
             subset = file_subset
             if file_subset == "all":
                 subset = str(pick(row, ("source",), where, "source", default="all"))
-            local_id = pick(row, ID_KEYS, where, "id", default=index)
+            # Ids use the line number, never the row's own "id": HC3's ids are not
+            # unique within a file, and reusing them dropped half the corpus.
             domain = DOMAIN_MAP.get(subset, "qa")
-            prefix = f"{NAME}:{file_subset}:{local_id}"
+            prefix = f"{NAME}:{file_subset}:{index}"
 
             for i, answer in enumerate(human):
                 text = clean_human_answer(answer)

@@ -90,10 +90,20 @@ def test_hc3_records():
     for r in records.values():
         assert r.domain == ("academic" if r.subdomain == "wiki_csai" else "qa")
         assert r.generator in {"human", "chatgpt"}
-    # Local id is the line number unless the row carries its own id.
+    # Local id is always the line number, even when the row carries its own id.
     assert "hc3:reddit_eli5:0:human:0" in records
     assert "hc3:reddit_eli5:1:chatgpt:1" in records
-    assert "hc3:finance:17:human:0" in records
+    assert "hc3:finance:0:human:0" in records
+
+
+def test_hc3_repeated_row_ids_still_give_unique_record_ids(tmp_path):
+    src = tmp_path / "hc3"
+    src.mkdir()
+    rows = [{"id": "0", "question": f"q{i}", "human_answers": [f"human {i}"],
+             "chatgpt_answers": [f"ai {i}"]} for i in range(3)]
+    (src / "finance.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    ids = [r.id for r in _load(hc3, tmp_path)]
+    assert len(ids) == 6 and len(set(ids)) == 6
 
 
 def test_hc3_cleans_tokenisation_artefacts_in_human_answers():
