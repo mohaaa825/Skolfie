@@ -1,0 +1,43 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+
+# Virtual environments
+.venv
+venv/
+env/
+.env
+
+# Test / lint / coverage caches
+.pytest_cache
+.ruff_cache
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Notebooks / editors / OS
+.ipynb_checkpoints/
+.idea/
+.vscode/
+.DS_Store
+
+# Project artifacts (trained models, user data, datasets)
+models/*.joblib
+feedback_data.csv
+data/raw/
+data/processed/
+
+# Gradio
+.gradio/
+flagged/

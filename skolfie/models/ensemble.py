@@ -1,6 +1,6 @@
 """
-ml_model.py
-------------
+skolfie/models/ensemble.py
+--------------------------
 The core AIDetectorModel class: an ensemble that combines
 
     1. Burrows' Delta         (stylometric distance to human/AI profiles)

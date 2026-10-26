@@ -1,6 +1,6 @@
 """
-feature_extraction.py
-----------------------
+skolfie/features/stylometric.py
+--------------------------------
 Extracts a rich set of stylometric / linguistic features from a text.
 
 Feature groups:
@@ -35,29 +35,31 @@ import numpy as np
 # (e.g. no internet on first run), we quietly fall back to regex-based
 # approximations so the app never crashes because of it.
 # --------------------------------------------------------------------------
+_NLTK_PACKAGES = [
+    ("tokenizers/punkt", "punkt"),
+    ("tokenizers/punkt_tab", "punkt_tab"),
+    ("taggers/averaged_perceptron_tagger", "averaged_perceptron_tagger"),
+    ("taggers/averaged_perceptron_tagger_eng", "averaged_perceptron_tagger_eng"),
+]
+
+
+def download_nltk_data() -> None:
+    """Download the NLTK resources this module uses. Run once at setup time;
+    importing the module never touches the network."""
+    import nltk
+
+    for path, pkg in _NLTK_PACKAGES:
+        try:
+            nltk.data.find(path)
+        except LookupError:
+            nltk.download(pkg, quiet=True)
+
+
 _NLTK_READY = False
 try:
-    import nltk
     from nltk.tokenize import word_tokenize, sent_tokenize
     from nltk import pos_tag
 
-    def _ensure_nltk_data():
-        packages = [
-            ("tokenizers/punkt", "punkt"),
-            ("tokenizers/punkt_tab", "punkt_tab"),
-            ("taggers/averaged_perceptron_tagger", "averaged_perceptron_tagger"),
-            ("taggers/averaged_perceptron_tagger_eng", "averaged_perceptron_tagger_eng"),
-        ]
-        for path, pkg in packages:
-            try:
-                nltk.data.find(path)
-            except LookupError:
-                try:
-                    nltk.download(pkg, quiet=True)
-                except Exception:
-                    pass
-
-    _ensure_nltk_data()
     word_tokenize("Smoke test.")  # confirm data actually loaded
     _NLTK_READY = True
 except Exception:
