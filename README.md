@@ -101,7 +101,29 @@ Providers: `anthropic`, `openai`, `gemini`, and any OpenAI-compatible server
 resumable and append to `data/raw/fresh/<model>.jsonl`. Rebuild the corpus
 afterwards to include them.
 
-## Train
+## Evaluate
+
+Fixed, versioned splits test generalisation rather than memorisation:
+`train` / `val` / `test`, plus `test_ood_generator` (GPT-4 and Cohere, never
+trained on), `test_ood_domain` (news, never trained on) and `test_short`
+(under 100 words). All answers to one HC3 question stay on the same side.
+See `configs/splits.json`.
+
+```bash
+python scripts/make_splits.py --corpus data/processed/corpus.parquet --out-dir data/processed
+python scripts/evaluate.py --corpus data/processed/corpus.parquet \
+    --splits data/processed/splits.parquet --model tfidf --out-dir reports/tfidf
+python scripts/evaluate.py --compare reports/*/report.json
+```
+
+Each run writes `report.md` (a report card: AUROC, F1, false-positive rate on
+human text at 95% AI recall, calibration error, per split, with breakdowns by
+generator, domain and source) and `report.json`. Models: `length` and
+`tfidf` baselines, `ensemble` (the current prototype), or `joblib:PATH` for any
+object with `predict_proba(texts)`. In Colab, use
+[`notebooks/evaluate.ipynb`](notebooks/evaluate.ipynb), which reads the corpus
+from and writes reports to Google Drive.
+
 
 ```bash
 # Smoke test on the synthetic fixture texts (checks the pipeline, NOT a real model)
@@ -158,6 +180,8 @@ skolfie/
 │   └── app/                       # Gradio app (python -m skolfie.app)
 ├── scripts/
 │   ├── build_corpus.py            # One-command corpus build
+│   ├── make_splits.py             # Versioned evaluation splits
+│   ├── evaluate.py                # Report card for any model, and --compare
 │   ├── generate_ai_texts.py       # Fresh AI text from current models
 │   └── train.py                   # Training CLI (--data, --feedback, --seed-demo)
 ├── tests/
