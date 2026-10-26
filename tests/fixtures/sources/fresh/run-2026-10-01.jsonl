@@ -1,0 +1,2 @@
+{"id": "fresh:0001", "text": "A short human paragraph written for the fresh test set.", "label": "human", "generator": "human", "domain": "news", "subdomain": "local-news", "source": "fresh", "split_hint": "", "n_words": 9}
+{"id": "0002", "text": "An AI generated paragraph about the weather in October.", "label": "ai", "generator": "gpt-4o-mini", "domain": "casual", "subdomain": "blog", "source": "fresh", "split_hint": "test", "n_words": 0}

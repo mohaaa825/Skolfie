@@ -21,6 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 app = ["gradio>=4"]
+data = ["huggingface_hub>=0.20", "gdown>=5"]
+generate = ["requests>=2.31"]
 dev = ["pytest", "ruff"]
 
 [tool.setuptools.packages.find]
