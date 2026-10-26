@@ -1,6 +1,6 @@
 """
-ml_model.py
-------------
+skolfie/models/ensemble.py
+--------------------------
 The core AIDetectorModel class: an ensemble that combines
 
     1. Burrows' Delta         (stylometric distance to human/AI profiles)
@@ -29,8 +29,8 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from feature_extraction import FeatureExtractor, tokenize_words, FUNCTION_WORDS, features_to_vector
-from burrows_delta import BurrowsDeltaModel
+from skolfie.features.stylometric import FeatureExtractor, tokenize_words, FUNCTION_WORDS, features_to_vector
+from skolfie.features.burrows_delta import BurrowsDeltaModel
 
 # Weight given to the Burrows' Delta signal vs. the ML ensemble signal when
 # blending the final probability. The ML ensemble generally becomes more

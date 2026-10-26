@@ -1,6 +1,6 @@
 """
-feedback_manager.py
----------------------
+skolfie/data/feedback.py
+------------------------
 Handles reading/writing user feedback to feedback_data.csv.
 
 Every piece of feedback given in the app (or manually added via the

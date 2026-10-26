@@ -1,6 +1,6 @@
 """
-data/training_data.py
------------------------
+tests/fixtures/seed_texts.py
+----------------------------
 A small SYNTHETIC seed dataset used to bootstrap the model so the app is
 usable immediately after installation, with no external dataset required.
 

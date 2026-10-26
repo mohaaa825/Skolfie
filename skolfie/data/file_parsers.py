@@ -1,28 +1,46 @@
 """
-file_parsers.py
-----------------
+skolfie/data/file_parsers.py
+-----------------------------
 Utilities for extracting raw text from uploaded files.
 
 Supports:
     - .txt   (plain text)
     - .docx  (Word documents, via python-docx)
-    - .pdf   (PDF documents, via PyPDF2)
+    - .pdf   (PDF documents, via pypdf)
 
 Every parser function returns a single string of extracted text.
 """
 
+from __future__ import annotations
+
+import codecs
 import os
+
+SUPPORTED_EXTENSIONS = (".txt", ".docx", ".pdf")
 
 
 def read_txt(file_path: str) -> str:
-    """Read a plain text file, trying a couple of common encodings."""
-    for encoding in ("utf-8", "latin-1"):
+    """
+    Read a plain text file.
+
+    A byte-order mark (UTF-8 / UTF-16) wins if present; otherwise UTF-8 is
+    tried, then Windows-1252, then Latin-1 (which accepts any byte sequence,
+    so decoding never fails outright).
+    """
+    with open(file_path, "rb") as f:
+        raw = f.read()
+
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig")
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return raw.decode("utf-16")
+
+    for encoding in ("utf-8", "cp1252"):
         try:
-            with open(file_path, "r", encoding=encoding) as f:
-                return f.read()
+            return raw.decode(encoding)
         except UnicodeDecodeError:
             continue
-    raise ValueError(f"Could not decode text file: {file_path}")
+    return raw.decode("latin-1")
 
 
 def read_docx(file_path: str) -> str:
@@ -51,16 +69,16 @@ def read_docx(file_path: str) -> str:
 def read_pdf(file_path: str) -> str:
     """Extract text from a .pdf file, page by page."""
     try:
-        import PyPDF2
+        from pypdf import PdfReader
     except ImportError as exc:
         raise ImportError(
-            "PyPDF2 is required to read .pdf files. "
-            "Install it with: pip install PyPDF2"
+            "pypdf is required to read .pdf files. "
+            "Install it with: pip install pypdf"
         ) from exc
 
     text_chunks = []
     with open(file_path, "rb") as f:
-        reader = PyPDF2.PdfReader(f)
+        reader = PdfReader(f)
         for page in reader.pages:
             page_text = page.extract_text() or ""
             text_chunks.append(page_text)
@@ -68,7 +86,7 @@ def read_pdf(file_path: str) -> str:
     return "\n".join(text_chunks)
 
 
-def extract_text_from_file(file_path: str) -> str:
+def extract_text_from_file(file_path: str | os.PathLike[str]) -> str:
     """
     Dispatch to the right parser based on file extension.
     Raises a ValueError for unsupported extensions.
@@ -76,6 +94,7 @@ def extract_text_from_file(file_path: str) -> str:
     if not file_path:
         return ""
 
+    file_path = os.fspath(file_path)
     ext = os.path.splitext(file_path)[1].lower()
 
     if ext == ".txt":
