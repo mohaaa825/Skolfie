@@ -20,6 +20,9 @@ Scorers:
                        (slow: one predict() call per text)
     JoblibScorer       any pickled object with predict_proba(texts), so later
                        models plug in without touching the harness
+
+The feature model (roadmap step 4) lives in `skolfie.models.feature_model`;
+`make_scorer` builds it for the `features*` specs.
 """
 
 from __future__ import annotations
@@ -348,16 +351,36 @@ class JoblibScorer:
         return out
 
 
-def make_scorer(spec: str, seed: int = 0) -> Any:
-    """Build a scorer from a CLI spec: length | tfidf | ensemble | ensemble:PATH | joblib:PATH."""
+FEATURE_SPECS = {
+    "features": {"classifier": "lgbm", "use_lm": True},
+    "features-nolm": {"classifier": "lgbm", "use_lm": False},
+    "features-rf": {"classifier": "rf", "use_lm": True},
+    "features-nolm-rf": {"classifier": "rf", "use_lm": False},
+}
+
+
+def make_scorer(spec: str, seed: int = 0, **options: Any) -> Any:
+    """
+    Build a scorer from a CLI spec: length | tfidf | ensemble | ensemble:PATH |
+    joblib:PATH | features | features-nolm | features-rf | features-nolm-rf.
+
+    `options` go to `FeatureModel` (cache_dir, lm_model, lm_batch_size, ...)
+    and are ignored by the other scorers; None values are dropped.
+    """
     if spec == "length":
         return LengthBaseline()
     if spec == "tfidf":
         return TfidfLRBaseline(seed=seed)
+    if spec in FEATURE_SPECS:
+        from skolfie.models.feature_model import FeatureModel
+
+        kwargs = {k: v for k, v in options.items() if v is not None}
+        return FeatureModel(**FEATURE_SPECS[spec], seed=seed, **kwargs)
     if spec == "ensemble":
         return AIDetectorAdapter(random_state=seed)
     if spec.startswith("ensemble:"):
         return AIDetectorAdapter(model_path=spec.split(":", 1)[1])
     if spec.startswith("joblib:"):
         return JoblibScorer(spec.split(":", 1)[1])
-    raise ValueError(f"unknown model spec {spec!r}; use length, tfidf, ensemble or joblib:PATH")
+    raise ValueError(f"unknown model spec {spec!r}; use length, tfidf, features, ensemble "
+                     "or joblib:PATH")

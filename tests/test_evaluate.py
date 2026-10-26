@@ -303,3 +303,29 @@ def test_cli_joblib_model_is_not_retrained(evaluate, data_files, corpus, tmp_pat
     assert report["train"] == {"pretrained": True, "n": 0, "n_human": 0, "n_ai": 0,
                                "n_available": 0, "fit_seconds": 0.0}
     assert "pretrained (not trained here)" in capsys.readouterr().out
+
+
+def test_cli_feature_model_cache_and_saved_model(evaluate, data_files, tmp_path: Path,
+                                                 capsys) -> None:
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("skolfie.features.style")
+    out = tmp_path / "features-nolm"
+    cache = tmp_path / "cache"
+    saved = tmp_path / "models" / "features.joblib"
+    assert _run(evaluate, data_files, "features-nolm", out, "--cache-dir", str(cache),
+                "--save-model", str(saved), "--n-jobs", "1") == 0
+    printed = capsys.readouterr().out
+    assert "## Feature importance" in printed
+    report = _strict_json(out / "report.json")
+    importance = report["model"]["feature_importance"]
+    assert importance and abs(sum(r["importance"] for r in importance) - 1) < 1e-6
+    assert report["model"]["params"]["use_lm"] is False
+    assert (cache / "style-v1.parquet").is_file() and saved.is_file()
+
+    # The saved model scores again without retraining and gives the same report numbers.
+    again = tmp_path / "reloaded"
+    assert _run(evaluate, data_files, f"joblib:{saved}", again) == 0
+    reloaded = _strict_json(again / "report.json")
+    assert reloaded["train"]["pretrained"] is True
+    for split, res in report["results"].items():
+        assert reloaded["results"][split]["metrics"]["auroc"] == res["metrics"]["auroc"]

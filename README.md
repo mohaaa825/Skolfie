@@ -11,8 +11,9 @@ a Gradio app for analysing text, collecting feedback and retraining.
 
 - **No trained model ships with the repo.** You have to train one yourself
   (see below). `models/*.joblib` is git-ignored.
-- **Accuracy has not been measured.** No held-out evaluation on real data
-  has been done yet, so treat any score the app prints as uncalibrated.
+- **The app still runs the old prototype model.** The new models are
+  measured with the held-out evaluation harness (see "Evaluate") but are not
+  wired into the app yet, so treat any score the app prints as uncalibrated.
 - **The seed texts are a test fixture, not a dataset.** The 25 human and
   25 AI texts in `tests/fixtures/seed_texts.py` are synthetic and
   deliberately clear-cut. They are useful for smoke tests (`--seed-demo`)
@@ -20,13 +21,13 @@ a Gradio app for analysing text, collecting feedback and retraining.
 
 ### Roadmap
 
-1. **Real data corpus.** The pipeline is in place (see "Build the data
-   corpus" below); the full corpus is built locally and is not committed.
-2. **Held-out evaluation.** Report accuracy, F1 and AUROC on data the model
-   never saw, split by source and generator (`scripts/train.py --test-size`
-   is the starting point).
-3. **DistilBERT + features model.** Replace the current blend with a
-   fine-tuned DistilBERT classifier combined with the stylometric features.
+Done: (1) repo cleanup, (2) a 259k-text corpus from HC3, M4GT and
+AuTexTification, (3) held-out evaluation with length and TF-IDF baselines,
+(4) the feature model (style + GPT-2 + Delta features into LightGBM).
+Next: (5) DistilBERT + features, (6) a calibrated combiner, (7) Mixed
+human/AI detection by chunks, (8) explanations, (9) evasion tests,
+(10) fairness checks, (11) API/CLI/web packaging, (12) retraining from
+feedback.
 
 ## Install
 
@@ -34,7 +35,8 @@ Requires Python 3.10 or newer.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[app,dev]"     # app = Gradio UI, dev = pytest + ruff
+pip install -e ".[app,dev]"     # app = Gradio UI, dev = pytest + ruff + lightgbm
+pip install -e ".[features]"    # GPT-2 features for the feature model (torch, transformers)
 ```
 
 The core install (`pip install -e .`) covers training and the library
@@ -124,6 +126,33 @@ object with `predict_proba(texts)`. In Colab, use
 [`notebooks/evaluate.ipynb`](notebooks/evaluate.ipynb), which reads the corpus
 from and writes reports to Google Drive.
 
+### Feature model (roadmap step 4)
+
+`--model features` trains LightGBM on three feature groups:
+
+- `sty_*`: about 40 stylometric features (`skolfie/features/style.py`), all
+  rates or ratios so they don't track text length; no NLTK needed.
+- `lm_*`: GPT-2 perplexity, burstiness (spread of surprise across tokens and
+  sentences) and token-rank statistics (`skolfie/features/lm.py`). Needs
+  `pip install -e ".[features]"` and, for a full corpus, a GPU.
+- `delta_*`: Cosine and Burrows' Delta distances to the human and AI
+  word-frequency profiles (`skolfie/features/delta_features.py`). The
+  training rows get out-of-fold values, so their own labels never leak in.
+
+```bash
+python scripts/evaluate.py --corpus data/processed/corpus.parquet \
+    --splits data/processed/splits.parquet --model features \
+    --cache-dir data/cache --save-model models/features.joblib --save-predictions
+```
+
+`features-nolm` skips GPT-2 (CPU only); `features-rf` and
+`features-nolm-rf` use a random forest instead of LightGBM. `--cache-dir`
+stores the style and GPT-2 features by text hash, so a re-run only refits
+the classifier. The report card adds a feature-importance table. In Colab
+use [`notebooks/feature_baseline.ipynb`](notebooks/feature_baseline.ipynb)
+on a T4 GPU runtime.
+
+## Train (old prototype)
 
 ```bash
 # Smoke test on the synthetic fixture texts (checks the pipeline, NOT a real model)
@@ -166,10 +195,17 @@ skolfie/
 ├── pyproject.toml                 # Package metadata, deps, ruff + pytest config
 ├── skolfie/
 │   ├── features/
-│   │   ├── stylometric.py         # FeatureExtractor: ~130 stylometric features
-│   │   └── burrows_delta.py       # Burrows' Delta (function-word z-score distance)
+│   │   ├── stylometric.py         # FeatureExtractor: ~130 stylometric features (old model)
+│   │   ├── burrows_delta.py       # Burrows' Delta (function-word z-score distance)
+│   │   ├── style.py               # ~40 length-normalised style features (feature model)
+│   │   ├── lm.py                  # GPT-2 perplexity / burstiness / token-rank features
+│   │   ├── delta_features.py      # Vectorised Cosine/Burrows Delta features
+│   │   └── cache.py               # On-disk feature cache keyed by text hash
 │   ├── models/
-│   │   └── ensemble.py            # AIDetectorModel: training, prediction, persistence
+│   │   ├── ensemble.py            # AIDetectorModel: the old prototype
+│   │   ├── baselines.py           # Length and TF-IDF baselines, make_scorer()
+│   │   └── feature_model.py       # FeatureModel: style + GPT-2 + Delta into LightGBM
+│   ├── eval/                      # Splits, metrics, report cards
 │   ├── data/
 │   │   ├── schema.py              # Record schema every corpus source maps into
 │   │   ├── corpus.py              # Corpus builder: clean, filter, dedupe, Parquet + manifest

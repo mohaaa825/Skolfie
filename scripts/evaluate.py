@@ -13,6 +13,11 @@ Examples:
     python scripts/evaluate.py --corpus ... --splits ... --model ensemble \\
         --max-train 5000 --max-eval 2000
 
+    # Feature model (roadmap step 4): style + GPT-2 + Delta features into LightGBM.
+    # GPT-2 needs a GPU for the full corpus; cache features so re-runs are fast.
+    python scripts/evaluate.py --corpus ... --splits ... --model features \\
+        --cache-dir data/cache --save-model models/features.joblib
+
     # Any pickled object with predict_proba(texts) (or a saved AIDetectorModel)
     python scripts/evaluate.py --corpus ... --splits ... \\
         --model joblib:models/detector_model.joblib --out-dir reports/ensemble-v1
@@ -34,7 +39,11 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MODEL_CHOICES = "length | tfidf | ensemble | ensemble:PATH | joblib:PATH"
+MODEL_CHOICES = (
+    "length | tfidf | features | features-nolm | features-rf | features-nolm-rf | ensemble | "
+    "ensemble:PATH | joblib:PATH"
+)
+FEATURE_MODELS = ("features", "features-nolm", "features-rf", "features-nolm-rf")
 # The ensemble calls predict() per text and extracts NLTK features: keep it bounded.
 ENSEMBLE_DEFAULT_MAX_TRAIN = 5000
 ENSEMBLE_DEFAULT_MAX_EVAL = 2000
@@ -48,7 +57,9 @@ def _ensure_repo_on_path() -> None:
 
 
 def _model_spec(value: str) -> str:
-    if value in ("length", "tfidf", "ensemble") or re.match(r"^(joblib|ensemble):.+", value):
+    if value in ("length", "tfidf", "ensemble", *FEATURE_MODELS):
+        return value
+    if re.match(r"^(joblib|ensemble):.+", value):
         return value
     raise argparse.ArgumentTypeError(f"invalid model {value!r}; use {MODEL_CHOICES}")
 
@@ -91,6 +102,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0, help="Sampling/model seed (default: 0).")
     parser.add_argument("--save-predictions", action="store_true",
                         help="Also write predictions.parquet (id, split, label, p_ai).")
+    parser.add_argument("--save-model", type=Path, metavar="PATH",
+                        help="Also save the fitted scorer with joblib (reload it with "
+                             "--model joblib:PATH).")
+    group = parser.add_argument_group("feature models (features, features-nolm, ...)")
+    group.add_argument("--cache-dir", type=Path,
+                       help="Cache per-text style/GPT-2 features here (parquet keyed by text "
+                            "hash), so re-runs skip the slow part.")
+    group.add_argument("--lm-model", help="Causal LM for the lm_* features (default: gpt2).")
+    group.add_argument("--lm-max-tokens", type=_positive_int,
+                       help="Truncate texts to N tokens for the LM (default: 512).")
+    group.add_argument("--lm-batch-size", type=_positive_int, help="LM batch size (default: 32).")
+    group.add_argument("--lm-device", help="cuda / cpu (default: cuda if available).")
+    group.add_argument("--n-jobs", type=int,
+                       help="Worker processes for style features and the classifier "
+                            "(default: -1 = all cores).")
     parser.add_argument("--compare", nargs="+", metavar="REPORT_JSON",
                         help="Only print a comparison table of these report.json files "
                              "(globs are expanded).")
@@ -152,7 +178,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"[data] {len(corpus):,} corpus rows; splits: "
           + ", ".join(f"{k}={v:,}" for k, v in splits["split"].value_counts().sort_index().items()))
 
-    scorer = make_scorer(args.model, seed=args.seed)
+    scorer = make_scorer(args.model, seed=args.seed, cache_dir=args.cache_dir,
+                         lm_model=args.lm_model, lm_max_tokens=args.lm_max_tokens,
+                         lm_batch_size=args.lm_batch_size, lm_device=args.lm_device,
+                         n_jobs=args.n_jobs)
     report, predictions = run_evaluation(
         scorer, corpus, splits, model_spec=args.model, corpus_path=args.corpus,
         splits_path=args.splits, splits_manifest=manifest, max_train=args.max_train,
@@ -162,6 +191,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("error: no evaluation splits found in the splits file", file=sys.stderr)
         return 2
     paths = write_report(report, out_dir, predictions if args.save_predictions else None)
+    if args.save_model:
+        import joblib
+
+        args.save_model.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(scorer, args.save_model)
+        paths["model"] = args.save_model
     print()
     print(paths["md"].read_text(encoding="utf-8"), end="")
     print(f"\n[save] {', '.join(str(p) for p in paths.values())}")
