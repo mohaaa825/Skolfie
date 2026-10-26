@@ -1,0 +1,9 @@
+{"text": "Fold the rope in half and wrap it around your arm , then tie off the ends.", "label": 0, "model": "human", "source": "wikihow", "parallel": true}
+{"text": "Coiling a climbing rope properly is an essential skill for any climber. Start by finding the middle of the rope.", "label": 1, "model": "chatGPT", "source": "wikihow", "parallel": true}
+{"text": "We propose a novel framework for polymer quantum mechanics and study its continuum limit.", "label": 1, "model": "davinci", "source": "arxiv", "parallel": true}
+{"text": "Great question! The reason the sky looks blue is because of Rayleigh scattering.", "label": 1, "model": "gpt4", "source": "reddit", "parallel": true}
+{"text": "This paper proposes a joint embedding of words and entities. The main strength is the experimental comparison.", "label": 1, "model": "bloomz", "source": "peerread", "parallel": true}
+{"text": "William Whitehouse was a 19th-century English cellist who taught at the Royal Academy of Music.", "label": 1, "model": "dolly", "source": "wikipedia", "parallel": true}
+{"text": "In this work we study the effect of noise on the training of large neural networks.", "label": 1, "model": "cohere", "source": "arxiv", "parallel": true}
+{"text": "Technology has changed the way students learn, and in my opinion this change is mostly positive.", "label": 1, "model": "gpt-3.5-turbo", "source": "outfox", "parallel": true}
+{"text": "I think students should not have to do community service because they already have alot of homework.", "label": 0, "model": "human", "source": "outfox", "parallel": true}
