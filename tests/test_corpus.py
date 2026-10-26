@@ -181,6 +181,7 @@ def test_invalid_and_duplicate_ids(tmp_path: Path) -> None:
     assert stats["invalid"] == 2
     assert stats["duplicate_id"] == 1
     assert read_ids(result) == ["s:1", "s:5"]
+    assert any("reusing an id" in w for w in result.manifest["warnings"])
 
 
 def test_balance_downsample(tmp_path: Path) -> None:
