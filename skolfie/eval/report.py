@@ -49,6 +49,7 @@ HEADLINE = (("auroc", "AUROC"), ("f1", "F1"), ("fpr_at_95tpr", "FPR@95%TPR"), ("
 HIGHER_IS_BETTER = {"auroc", "f1", "accuracy"}
 CORPUS_COLUMNS = ["id", "text", "label", *BREAKDOWN_BY]
 MAX_BREAKDOWN_ROWS = 25
+MAX_IMPORTANCE_ROWS = 25
 
 
 # --------------------------------------------------------------------------- #
@@ -139,6 +140,12 @@ def _model_params(scorer: Any) -> dict[str, Any]:
     return params() if callable(params) else {}
 
 
+def _feature_importance(scorer: Any) -> list[dict[str, Any]]:
+    """[{feature, importance}] from scorers that expose `feature_importance()`, else []."""
+    method = getattr(scorer, "feature_importance", None)
+    return list(method()) if callable(method) else []
+
+
 def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
                    model_spec: str | None = None,
                    corpus_path: str | os.PathLike[str] | None = None,
@@ -216,7 +223,8 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
         "schema": REPORT_SCHEMA,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "model": {"name": scorer.name, "spec": model_spec or scorer.name,
-                  "class": type(scorer).__name__, "params": _model_params(scorer)},
+                  "class": type(scorer).__name__, "params": _model_params(scorer),
+                  "feature_importance": _feature_importance(scorer)},
         "corpus": {"path": None if corpus_path is None else os.fspath(corpus_path),
                    "corpus_version": manifest.get("corpus_version"), "n_rows": len(corpus)},
         "splits": {"path": None if splits_path is None else os.fspath(splits_path),
@@ -325,6 +333,14 @@ def render_report_md(report: dict[str, Any]) -> str:
     lines += _table(["split", "n"] + [label for _, label in HEADLINE] + ["predict"], rows)
     if notes:
         lines += ["", "Notes:", ""] + notes
+
+    importance = model.get("feature_importance") or []
+    if importance:
+        shown = importance[:MAX_IMPORTANCE_ROWS]
+        lines += ["", f"## Feature importance (top {len(shown)} of {len(importance)})", "",
+                  "Share of the model's total importance (sums to 1 over all features).", ""]
+        lines += _table(["feature", "importance"],
+                        [[r["feature"], _fmt(r["importance"])] for r in shown])
 
     for split, res in report["results"].items():
         lines += ["", f"## Breakdown: {split}"]

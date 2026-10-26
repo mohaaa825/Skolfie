@@ -23,7 +23,8 @@ dependencies = [
 app = ["gradio>=4"]
 data = ["huggingface_hub>=0.20", "gdown>=5"]
 generate = ["requests>=2.31"]
-dev = ["pytest", "ruff"]
+features = ["lightgbm>=4", "torch>=2.1", "transformers>=4.40"]
+dev = ["pytest", "ruff", "lightgbm>=4"]
 
 [tool.setuptools.packages.find]
 include = ["skolfie*"]
