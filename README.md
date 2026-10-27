@@ -25,8 +25,8 @@ Done: (1) repo cleanup, (2) a 259k-text corpus from HC3, M4GT and
 AuTexTification, (3) held-out evaluation with length and TF-IDF baselines,
 (4) the feature model (style + GPT-2 + Delta features into LightGBM),
 (5) DistilBERT + features, (6) a calibrated combiner with Human /
-Uncertain / AI verdicts. Next: (7) Mixed
-human/AI detection by chunks, (8) explanations, (9) evasion tests,
+Uncertain / AI verdicts, (7) Mixed human/AI detection by chunks (code
+done, first GPU run pending). Next: (8) explanations, (9) evasion tests,
 (10) fairness checks, (11) API/CLI/web packaging, (12) retraining from
 feedback.
 
@@ -188,6 +188,36 @@ The saved `StackedModel` loads the member models itself; `predict()`
 returns the verdicts. In Colab use
 [`notebooks/stack.ipynb`](notebooks/stack.ipynb) (CPU is enough).
 
+### Mixed texts (roadmap step 7)
+
+The corpus has no texts that are part human and part AI, so
+`scripts/eval_mixed.py` makes them: it splices passages of a human and an
+AI text from the same source and domain (patterns `ha`, `ah`, `hah`,
+`aha`; same question for HC3), records where the AI parts are, and adds
+pure human and AI texts. A set from `val` tunes the decision rules and a
+set from `test` is reported on.
+
+A saved model scores each whole text and each chunk of about 60 words
+(whole sentences). Two rules are compared on the three-way task Human /
+AI / Mixed:
+
+- **chunk rule**: Mixed when enough chunks score clearly AI and enough
+  score clearly human;
+- **whole-text rule** (baseline): Mixed when the whole-text score falls in
+  a middle band.
+
+The report gives macro-F1 for both, Mixed recall per splice pattern, and
+how well the AI chunks match the true AI spans (character-level F1 and the
+boundary error in words).
+
+```bash
+python scripts/eval_mixed.py --corpus data/processed/corpus.parquet \
+    --splits data/processed/splits.parquet \
+    --model models/transformer.joblib --out-dir reports/mixed-transformer
+```
+
+In Colab use [`notebooks/mixed.ipynb`](notebooks/mixed.ipynb) (GPU).
+
 ## Train (old prototype)
 
 ```bash
@@ -243,6 +273,10 @@ skolfie/
 │   │   ├── feature_model.py       # FeatureModel: style + GPT-2 + Delta into LightGBM
 │   │   ├── transformer_model.py   # TransformerModel: DistilBERT + features
 │   │   └── stacker.py             # Calibrated stack + Human/Uncertain/AI cut-offs
+│   ├── mixed/
+│   │   ├── chunking.py            # Sentence split + ~60-word chunks
+│   │   ├── synth.py               # Synthetic human/AI spliced test sets
+│   │   └── detector.py            # Chunk scoring, Mixed rules, span metrics
 │   ├── eval/                      # Splits, metrics, report cards
 │   ├── data/
 │   │   ├── schema.py              # Record schema every corpus source maps into
@@ -257,6 +291,7 @@ skolfie/
 │   ├── make_splits.py             # Versioned evaluation splits
 │   ├── evaluate.py                # Report card for any model, and --compare
 │   ├── stack.py                   # Calibrated combiner + verdict cut-offs
+│   ├── eval_mixed.py              # Mixed-text evaluation (chunk vs whole-text rule)
 │   ├── generate_ai_texts.py       # Fresh AI text from current models
 │   └── train.py                   # Training CLI (--data, --feedback, --seed-demo)
 ├── tests/
