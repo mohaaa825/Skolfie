@@ -214,6 +214,21 @@ def test_stack_script_end_to_end(reports, capsys) -> None:
                                test["p_ai"].to_numpy(), atol=1e-9)
 
 
+def test_load_member_averages_small_split_differences(tmp_path: Path, capsys) -> None:
+    stack = _load_script("stack")
+    path = tmp_path / "p.parquet"
+    pd.DataFrame({"id": ["a", "a", "b"], "split": ["test", "test_short", "test"],
+                  "p_ai": [0.9000, 0.9004, 0.2]}).to_parquet(path)
+    scores = stack.load_member(path)
+    assert scores["a"] == pytest.approx(0.9002) and scores["b"] == 0.2
+    assert "1 ids scored slightly differently" in capsys.readouterr().out
+
+    pd.DataFrame({"id": ["a", "a"], "split": ["test", "test_short"],
+                  "p_ai": [0.9, 0.3]}).to_parquet(path)
+    with pytest.raises(ValueError, match="more than one run"):
+        stack.load_member(path)
+
+
 def test_stack_script_usage_errors(reports) -> None:
     stack = _load_script("stack")
     root = reports["root"]
