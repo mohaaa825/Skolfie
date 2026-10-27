@@ -23,8 +23,8 @@ a Gradio app for analysing text, collecting feedback and retraining.
 
 Done: (1) repo cleanup, (2) a 259k-text corpus from HC3, M4GT and
 AuTexTification, (3) held-out evaluation with length and TF-IDF baselines,
-(4) the feature model (style + GPT-2 + Delta features into LightGBM).
-Next: (5) DistilBERT + features, (6) a calibrated combiner, (7) Mixed
+(4) the feature model (style + GPT-2 + Delta features into LightGBM),
+(5) DistilBERT + features. Next: (6) a calibrated combiner, (7) Mixed
 human/AI detection by chunks, (8) explanations, (9) evasion tests,
 (10) fairness checks, (11) API/CLI/web packaging, (12) retraining from
 feedback.
@@ -152,6 +152,17 @@ the classifier. The report card adds a feature-importance table. In Colab
 use [`notebooks/feature_baseline.ipynb`](notebooks/feature_baseline.ipynb)
 on a T4 GPU runtime.
 
+### Transformer + features model (roadmap step 5)
+
+`--model transformer` fine-tunes DistilBERT (`distilbert-base-cased`, so
+case and punctuation are kept) together with the step 4 style and GPT-2
+features: the [CLS] vector and a small network over the standardised
+features are joined before the final layer (the Annepaka et al. design).
+`transformer-text` drops the features, to measure what they add. Training
+needs a GPU; use [`notebooks/transformer.ipynb`](notebooks/transformer.ipynb)
+on a Colab T4. `--hf-model`, `--max-length`, `--epochs` and `--batch-size`
+change the defaults.
+
 ## Train (old prototype)
 
 ```bash
@@ -204,7 +215,8 @@ skolfie/
 │   ├── models/
 │   │   ├── ensemble.py            # AIDetectorModel: the old prototype
 │   │   ├── baselines.py           # Length and TF-IDF baselines, make_scorer()
-│   │   └── feature_model.py       # FeatureModel: style + GPT-2 + Delta into LightGBM
+│   │   ├── feature_model.py       # FeatureModel: style + GPT-2 + Delta into LightGBM
+│   │   └── transformer_model.py   # TransformerModel: DistilBERT + features
 │   ├── eval/                      # Splits, metrics, report cards
 │   ├── data/
 │   │   ├── schema.py              # Record schema every corpus source maps into

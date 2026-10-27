@@ -133,6 +133,13 @@ class FeatureModel:
         cache = self._cache("lm", name, LM_FEATURES)
         return cache.compute(texts, lambda chunk: lm.features(chunk, progress=True))
 
+    def base_features(self, texts: Sequence[str]) -> tuple[np.ndarray, list[str]]:
+        """(style [+ LM] feature matrix, names): the label-free features, cached.
+
+        Needs no fitting; the transformer model (step 5) reuses it.
+        """
+        return self._base_features(list(texts))
+
     def _base_features(self, texts: list[str]) -> tuple[np.ndarray, list[str]]:
         from skolfie.features.style import STYLE_FEATURES
 

@@ -18,6 +18,10 @@ Examples:
     python scripts/evaluate.py --corpus ... --splits ... --model features \\
         --cache-dir data/cache --save-model models/features.joblib
 
+    # DistilBERT fine-tuned with the same style + GPT-2 features (step 5; GPU)
+    python scripts/evaluate.py --corpus ... --splits ... --model transformer \\
+        --cache-dir data/cache --save-model models/transformer.joblib
+
     # Any pickled object with predict_proba(texts) (or a saved AIDetectorModel)
     python scripts/evaluate.py --corpus ... --splits ... \\
         --model joblib:models/detector_model.joblib --out-dir reports/ensemble-v1
@@ -41,9 +45,10 @@ from typing import Optional, Sequence
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODEL_CHOICES = (
     "length | tfidf | features | features-nolm | features-rf | features-nolm-rf | ensemble | "
-    "ensemble:PATH | joblib:PATH"
+    "transformer | transformer-text | ensemble:PATH | joblib:PATH"
 )
-FEATURE_MODELS = ("features", "features-nolm", "features-rf", "features-nolm-rf")
+NAMED_MODELS = ("features", "features-nolm", "features-rf", "features-nolm-rf",
+                  "transformer", "transformer-text")
 # The ensemble calls predict() per text and extracts NLTK features: keep it bounded.
 ENSEMBLE_DEFAULT_MAX_TRAIN = 5000
 ENSEMBLE_DEFAULT_MAX_EVAL = 2000
@@ -57,7 +62,7 @@ def _ensure_repo_on_path() -> None:
 
 
 def _model_spec(value: str) -> str:
-    if value in ("length", "tfidf", "ensemble", *FEATURE_MODELS):
+    if value in ("length", "tfidf", "ensemble", *NAMED_MODELS):
         return value
     if re.match(r"^(joblib|ensemble):.+", value):
         return value
@@ -105,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save-model", type=Path, metavar="PATH",
                         help="Also save the fitted scorer with joblib (reload it with "
                              "--model joblib:PATH).")
-    group = parser.add_argument_group("feature models (features, features-nolm, ...)")
+    group = parser.add_argument_group("feature and transformer models (features, transformer, ...)")
     group.add_argument("--cache-dir", type=Path,
                        help="Cache per-text style/GPT-2 features here (parquet keyed by text "
                             "hash), so re-runs skip the slow part.")
@@ -117,6 +122,13 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--n-jobs", type=int,
                        help="Worker processes for style features and the classifier "
                             "(default: -1 = all cores).")
+    group.add_argument("--hf-model",
+                       help="Transformer backbone (default: distilbert-base-cased).")
+    group.add_argument("--max-length", type=_positive_int,
+                       help="Transformer input length in tokens (default: 512).")
+    group.add_argument("--epochs", type=_positive_int, help="Transformer epochs (default: 1).")
+    group.add_argument("--batch-size", type=_positive_int,
+                       help="Transformer batch size (default: 16, x2 gradient accumulation).")
     parser.add_argument("--compare", nargs="+", metavar="REPORT_JSON",
                         help="Only print a comparison table of these report.json files "
                              "(globs are expanded).")
@@ -181,7 +193,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     scorer = make_scorer(args.model, seed=args.seed, cache_dir=args.cache_dir,
                          lm_model=args.lm_model, lm_max_tokens=args.lm_max_tokens,
                          lm_batch_size=args.lm_batch_size, lm_device=args.lm_device,
-                         n_jobs=args.n_jobs)
+                         n_jobs=args.n_jobs, model_name=args.hf_model,
+                         max_length=args.max_length, epochs=args.epochs,
+                         batch_size=args.batch_size)
     report, predictions = run_evaluation(
         scorer, corpus, splits, model_spec=args.model, corpus_path=args.corpus,
         splits_path=args.splits, splits_manifest=manifest, max_train=args.max_train,
