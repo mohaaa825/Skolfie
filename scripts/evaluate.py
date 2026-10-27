@@ -26,6 +26,11 @@ Examples:
     python scripts/evaluate.py --corpus ... --splits ... \\
         --model joblib:models/detector_model.joblib --out-dir reports/ensemble-v1
 
+    # Adversarial training (step 9): also train on attacked copies of train texts
+    python scripts/evaluate.py --corpus ... --splits ... --model transformer \\
+        --extra-train reports/robust/attacks-train/attacks.parquet \\
+        --out-dir reports/transformer-adv --save-model models/transformer-adv.joblib
+
     # Compare existing reports on the headline metrics
     python scripts/evaluate.py --compare reports/*/report.json
 
@@ -40,7 +45,7 @@ import glob
 import re
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODEL_CHOICES = (
@@ -110,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save-model", type=Path, metavar="PATH",
                         help="Also save the fitted scorer with joblib (reload it with "
                              "--model joblib:PATH).")
+    parser.add_argument("--extra-train", type=Path, action="append", default=[],
+                        metavar="PARQUET",
+                        help="Extra training rows (columns text, label), appended to the train "
+                             "split before fitting, e.g. attacked copies from make_attacks.py "
+                             "--share for adversarial training. Repeatable. Rows whose text (or "
+                             "orig_id) is in an evaluation split are dropped.")
     group = parser.add_argument_group("feature and transformer models (features, transformer, ...)")
     group.add_argument("--cache-dir", type=Path,
                        help="Cache per-text style/GPT-2 features here (parquet keyed by text "
@@ -141,6 +152,24 @@ def _expand(patterns: Sequence[str]) -> list[str]:
         matches = sorted(glob.glob(pattern)) if any(c in pattern for c in "*?[") else [pattern]
         paths += [m for m in matches if m not in paths]
     return paths
+
+
+def load_extra_train(paths: Sequence[Path], parser: argparse.ArgumentParser) -> Any:
+    """The --extra-train files as one frame: text, label, extra_source (+ orig_id, attack)."""
+    import pandas as pd
+
+    frames = []
+    for path in paths:
+        if not path.is_file():
+            parser.error(f"--extra-train file not found: {path}")
+        df = pd.read_parquet(path)
+        missing = {"text", "label"} - set(df.columns)
+        if missing:
+            parser.error(f"--extra-train {path} is missing column(s): "
+                         f"{', '.join(sorted(missing))}")
+        cols = [c for c in ("text", "label", "orig_id", "attack") if c in df.columns]
+        frames.append(df[cols].assign(extra_source=str(path)))
+    return pd.concat(frames, ignore_index=True)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -184,6 +213,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from skolfie.models.baselines import make_scorer
 
     out_dir = args.out_dir or default_out_dir(args.model)
+    extra_train = None
+    if args.extra_train:
+        extra_train = load_extra_train(args.extra_train, parser)
+        print(f"[data] {len(extra_train):,} extra train rows from "
+              f"{len(args.extra_train)} file(s)")
     corpus = load_corpus(args.corpus)
     splits = load_splits(args.splits)
     manifest = load_splits_manifest(args.splits)
@@ -199,7 +233,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     report, predictions = run_evaluation(
         scorer, corpus, splits, model_spec=args.model, corpus_path=args.corpus,
         splits_path=args.splits, splits_manifest=manifest, max_train=args.max_train,
-        max_eval=args.max_eval, seed=args.seed,
+        max_eval=args.max_eval, seed=args.seed, extra_train=extra_train,
     )
     if not report["results"]:
         print("error: no evaluation splits found in the splits file", file=sys.stderr)

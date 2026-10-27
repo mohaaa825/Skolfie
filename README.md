@@ -25,8 +25,8 @@ Done: (1) repo cleanup, (2) a 259k-text corpus from HC3, M4GT and
 AuTexTification, (3) held-out evaluation with length and TF-IDF baselines,
 (4) the feature model (style + GPT-2 + Delta features into LightGBM),
 (5) DistilBERT + features, (6) a calibrated combiner with Human /
-Uncertain / AI verdicts, (7) Mixed human/AI detection by chunks (code
-done, first GPU run pending). Next: (8) explanations, (9) evasion tests,
+Uncertain / AI verdicts, (7) Mixed human/AI detection by chunks. Code
+done, runs pending: (8) explanations, (9) evasion tests. Next:
 (10) fairness checks, (11) API/CLI/web packaging, (12) retraining from
 feedback.
 
@@ -226,6 +226,33 @@ Mixed evaluation and compares it with `transformer` (GPU). The rules are
 tuned so that at most `--max-false-mixed` (default 5%) of pure human texts,
 and of pure AI texts, are called Mixed.
 
+### Explanations (roadmap step 8)
+
+`skolfie.explain.Explainer` gives every verdict its five strongest reasons:
+exact SHAP contributions of the feature model (LightGBM), each with its
+direction and a plain-language reason ("low vocabulary variety, typical of
+AI text"), plus the step 7 chunk scores as a heatmap. The output is plain
+JSON: `{label, verdict, p_ai, chunks, highlights, top_features}`.
+`scripts/explain.py` writes a review sheet for 20 random test texts
+(`review.md` to fill in by hand, `review.html` to read); in Colab use
+[`notebooks/explain.ipynb`](notebooks/explain.ipynb).
+
+### Evasion tests (roadmap step 9)
+
+`scripts/make_attacks.py` builds attacked copies of test texts: typos,
+synonyms, Cyrillic look-alike letters, zero-width spaces, T5 paraphrasing
+(GPU), simulated human edits (a share of the sentences swapped for human
+ones), and, with an API key, LLM paraphrasing, "humanizer" rewrites and
+regeneration at low and high temperature. Noise attacks are also applied
+to human texts, to check they don't cause false alarms.
+`scripts/eval_robust.py` gives a robustness table per attack (AUROC, AI
+recall at 0.5 and at the 1%-FPR cut-off, false alarms on attacked human
+text) and compares models. For adversarial training,
+`make_attacks.py --split train --share S` builds attacked training copies
+and `evaluate.py --extra-train PATH` adds them to the training set
+(attacked copies of evaluation texts are dropped). In Colab use
+[`notebooks/robust.ipynb`](notebooks/robust.ipynb).
+
 ## Train (old prototype)
 
 ```bash
@@ -285,6 +312,8 @@ skolfie/
 │   │   ├── chunking.py            # Sentence split + ~60-word chunks
 │   │   ├── synth.py               # Synthetic human/AI spliced test sets
 │   │   └── detector.py            # Chunk scoring, Mixed rules, span metrics
+│   ├── explain/                   # SHAP reasons, Explainer, review pages
+│   ├── robust/                    # Evasion attacks
 │   ├── eval/                      # Splits, metrics, report cards
 │   ├── data/
 │   │   ├── schema.py              # Record schema every corpus source maps into
@@ -300,6 +329,9 @@ skolfie/
 │   ├── evaluate.py                # Report card for any model, and --compare
 │   ├── stack.py                   # Calibrated combiner + verdict cut-offs
 │   ├── eval_mixed.py              # Mixed-text evaluation (chunk vs whole-text rule)
+│   ├── explain.py                 # Explanation review sheet for random test texts
+│   ├── make_attacks.py            # Attacked test / training sets
+│   ├── eval_robust.py             # Robustness table per attack
 │   ├── generate_ai_texts.py       # Fresh AI text from current models
 │   └── train.py                   # Training CLI (--data, --feedback, --seed-demo)
 ├── tests/
