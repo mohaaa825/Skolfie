@@ -11,6 +11,14 @@ Network, trained end to end with binary cross-entropy on P(ai):
     concat(768 + 64) -> dropout -> Linear(., 1) -> logit of P(ai)
 
 `use_features=False` drops the feature branch (name "transformer-text").
+
+Chunk training (`chunk_augment=k`, name "transformer-chunks"): besides each
+whole training text, the model also trains on up to k of its chunks
+(`skolfie.mixed.chunking.chunk_spans`, about `chunk_words` words of whole
+sentences), labelled like the text. The Mixed detector (roadmap step 7)
+scores such chunks one by one, and a model that only saw whole texts scores
+them noisily. Only texts with two or more chunks add any, and the held-out
+texts are split off first, so none of their chunks are trained on.
 The default backbone is `distilbert-base-cased`: case, punctuation and stop
 words are kept, since they carry much of the style signal.
 
@@ -192,7 +200,8 @@ class TransformerModel:
                  cache_dir: str | os.PathLike[str] | None = None, lm_model: str = "gpt2",
                  lm_max_tokens: int = 512, lm_batch_size: int = 32, n_jobs: int = -1,
                  seed: int = 0, backbone: Any = None, tokenizer: Any = None,
-                 log: Callable[[str], None] = print, lm_device: str | None = None) -> None:
+                 log: Callable[[str], None] = print, lm_device: str | None = None,
+                 chunk_augment: int = 0, chunk_words: int = 60) -> None:
         if (backbone is None) != (tokenizer is None):
             raise ValueError("inject both `backbone` and `tokenizer`, or neither")
         for name, value in (("max_length", max_length), ("epochs", epochs),
@@ -201,6 +210,10 @@ class TransformerModel:
                 raise ValueError(f"{name} must be >= 1, got {value}")
         if max_length < 2:
             raise ValueError("max_length must be >= 2 (room for [CLS] and [SEP])")
+        if int(chunk_augment) < 0:
+            raise ValueError(f"chunk_augment must be >= 0, got {chunk_augment}")
+        if int(chunk_words) < 1:
+            raise ValueError(f"chunk_words must be >= 1, got {chunk_words}")
         if not 0.0 <= eval_fraction < 0.5:
             raise ValueError("eval_fraction must be in [0, 0.5)")
         if not 0.0 <= warmup_ratio < 1.0:
@@ -228,7 +241,11 @@ class TransformerModel:
         self.n_jobs = n_jobs
         self.seed = seed
         self.log = log
+        self.chunk_augment = int(chunk_augment)
+        self.chunk_words = int(chunk_words)
         self.name = "transformer" if use_features else "transformer-text"
+        if self.chunk_augment:
+            self.name += "-chunks"
 
         self._features: FeatureModel | None = None
         if use_features:
@@ -247,6 +264,7 @@ class TransformerModel:
         self.total_steps_ = 0
         self.n_train_ = 0
         self.n_eval_ = 0
+        self.n_chunks_ = 0
         self.feature_seconds_: float | None = None
         self.train_seconds_: float | None = None
         # Live objects (never pickled) and their pickled form.
@@ -272,6 +290,10 @@ class TransformerModel:
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
+        # Models saved before chunk training existed.
+        state.setdefault("chunk_augment", 0)
+        state.setdefault("chunk_words", 60)
+        state.setdefault("n_chunks_", 0)
         self.__dict__.update(state)
 
     def _pack(self) -> dict[str, Any]:
@@ -460,6 +482,10 @@ class TransformerModel:
             raise ValueError("need both human and ai training texts")
         self._seed_everything()
 
+        train_idx, eval_idx = holdout_split(y, self.eval_fraction, self.seed)
+        if self.chunk_augment:
+            texts, y, train_idx = self._add_chunks(texts, y, train_idx)
+
         start = time.perf_counter()
         feats = None
         if self.use_features:
@@ -481,11 +507,34 @@ class TransformerModel:
         self._packed = None
         self._setup(backbone, tokenizer)
 
-        train_idx, eval_idx = holdout_split(y, self.eval_fraction, self.seed)
         start = time.perf_counter()
         self._train(texts, y, feats, train_idx, eval_idx)
         self.train_seconds_ = time.perf_counter() - start
         return self
+
+    def _add_chunks(self, texts: list[str], y: np.ndarray,
+                    train_idx: np.ndarray) -> tuple[list[str], np.ndarray, np.ndarray]:
+        """Append up to `chunk_augment` chunks of each training text (same label)."""
+        from skolfie.mixed.chunking import chunk_spans
+
+        rng = np.random.default_rng(self.seed)
+        min_words = max(1, int(round(self.chunk_words * 25 / 60)))
+        extra, extra_y = [], []
+        for i in train_idx:
+            spans = chunk_spans(texts[i], target_words=self.chunk_words, min_words=min_words)
+            if len(spans) < 2:
+                continue
+            k = min(self.chunk_augment, len(spans))
+            for j in sorted(rng.choice(len(spans), size=k, replace=False)):
+                a, b = spans[j]
+                extra.append(texts[i][a:b])
+                extra_y.append(y[i])
+        self.n_chunks_ = len(extra)
+        self.log(f"[transformer] chunk training: {len(extra):,} chunks of about "
+                 f"{self.chunk_words} words added to {train_idx.size:,} training texts")
+        new_idx = np.arange(len(texts), len(texts) + len(extra), dtype=train_idx.dtype)
+        return (texts + extra, np.concatenate([y, np.asarray(extra_y, dtype=y.dtype)]),
+                np.concatenate([train_idx, new_idx]))
 
     def _train(self, texts: list[str], y: np.ndarray, feats: np.ndarray | None,
                train_idx: np.ndarray, eval_idx: np.ndarray) -> None:
@@ -613,6 +662,9 @@ class TransformerModel:
         out: dict[str, Any] = {k: getattr(self, k) for k in (
             "model_name", "use_features", "max_length", "epochs", "batch_size", "grad_accum",
             "lr", "head_lr", "weight_decay", "warmup_ratio", "eval_fraction", "seed")}
+        if self.chunk_augment:
+            out.update(chunk_augment=self.chunk_augment, chunk_words=self.chunk_words,
+                       n_chunks=self.n_chunks_)
         if self.use_features:
             out["use_lm"] = self.use_lm
             if self.use_lm:

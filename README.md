@@ -218,6 +218,14 @@ python scripts/eval_mixed.py --corpus data/processed/corpus.parquet \
 
 In Colab use [`notebooks/mixed.ipynb`](notebooks/mixed.ipynb) (GPU).
 
+Single chunks are harder to score than whole texts, so `--model
+transformer-chunks` (in `evaluate.py`) trains the step 5 model on every
+training text plus one random ~60-word chunk of it, with the same label.
+[`notebooks/chunks.ipynb`](notebooks/chunks.ipynb) trains it, reruns the
+Mixed evaluation and compares it with `transformer` (GPU). The rules are
+tuned so that at most `--max-false-mixed` (default 5%) of pure human texts,
+and of pure AI texts, are called Mixed.
+
 ## Train (old prototype)
 
 ```bash

@@ -48,7 +48,7 @@ MODEL_CHOICES = (
     "transformer | transformer-text | ensemble:PATH | joblib:PATH"
 )
 NAMED_MODELS = ("features", "features-nolm", "features-rf", "features-nolm-rf",
-                  "transformer", "transformer-text")
+                  "transformer", "transformer-text", "transformer-chunks")
 # The ensemble calls predict() per text and extracts NLTK features: keep it bounded.
 ENSEMBLE_DEFAULT_MAX_TRAIN = 5000
 ENSEMBLE_DEFAULT_MAX_EVAL = 2000
