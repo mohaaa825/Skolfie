@@ -21,8 +21,10 @@ Scorers:
     JoblibScorer       any pickled object with predict_proba(texts), so later
                        models plug in without touching the harness
 
-The feature model (roadmap step 4) lives in `skolfie.models.feature_model`;
-`make_scorer` builds it for the `features*` specs.
+The feature model (roadmap step 4) lives in `skolfie.models.feature_model`
+and the DistilBERT + features model (step 5) in
+`skolfie.models.transformer_model`; `make_scorer` builds them for the
+`features*` and `transformer*` specs.
 """
 
 from __future__ import annotations
@@ -357,16 +359,25 @@ FEATURE_SPECS = {
     "features-rf": {"classifier": "rf", "use_lm": True},
     "features-nolm-rf": {"classifier": "rf", "use_lm": False},
 }
+TRANSFORMER_SPECS = {
+    "transformer": {"use_features": True},
+    "transformer-text": {"use_features": False},
+}
+# make_scorer options that only the transformer model takes.
+_TRANSFORMER_ONLY = ("model_name", "max_length", "epochs", "batch_size")
 
 
 def make_scorer(spec: str, seed: int = 0, **options: Any) -> Any:
     """
     Build a scorer from a CLI spec: length | tfidf | ensemble | ensemble:PATH |
-    joblib:PATH | features | features-nolm | features-rf | features-nolm-rf.
+    joblib:PATH | features | features-nolm | features-rf | features-nolm-rf |
+    transformer | transformer-text.
 
     `options` go to `FeatureModel` (cache_dir, lm_model, lm_batch_size, ...)
+    and `TransformerModel` (also model_name, max_length, epochs, batch_size)
     and are ignored by the other scorers; None values are dropped.
     """
+    kwargs = {k: v for k, v in options.items() if v is not None}
     if spec == "length":
         return LengthBaseline()
     if spec == "tfidf":
@@ -374,8 +385,12 @@ def make_scorer(spec: str, seed: int = 0, **options: Any) -> Any:
     if spec in FEATURE_SPECS:
         from skolfie.models.feature_model import FeatureModel
 
-        kwargs = {k: v for k, v in options.items() if v is not None}
-        return FeatureModel(**FEATURE_SPECS[spec], seed=seed, **kwargs)
+        feature_kwargs = {k: v for k, v in kwargs.items() if k not in _TRANSFORMER_ONLY}
+        return FeatureModel(**FEATURE_SPECS[spec], seed=seed, **feature_kwargs)
+    if spec in TRANSFORMER_SPECS:
+        from skolfie.models.transformer_model import TransformerModel
+
+        return TransformerModel(**TRANSFORMER_SPECS[spec], seed=seed, **kwargs)
     if spec == "ensemble":
         return AIDetectorAdapter(random_state=seed)
     if spec.startswith("ensemble:"):
