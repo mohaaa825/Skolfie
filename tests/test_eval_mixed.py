@@ -47,8 +47,10 @@ def test_eval_mixed_end_to_end(data, capsys) -> None:
     report = json.loads((out / "mixed_report.json").read_text())
     assert report["sets"]["eval"] == {"n": 80, "n_human": 20, "n_ai": 20, "n_mixed": 40}
     assert set(report["rules"]) == {"chunk", "whole_text"}
+    assert report["max_false_mixed"] == 0.05
     for rule in report["rules"].values():
         assert 0 <= rule["metrics"]["macro_f1"] <= 1
+        assert {"human_to_mixed_rate", "ai_to_mixed_rate"} <= set(rule["metrics"])
     assert set(report["by_pattern"]) <= {"ha", "ah", "hah", "aha"}
     assert sum(r["n"] for r in report["by_pattern"].values()) == 40
     assert 0 <= report["spans"]["char_f1"] <= 1
@@ -65,6 +67,8 @@ def test_eval_mixed_usage_errors(data) -> None:
     script = _load_script("eval_mixed")
     with pytest.raises(SystemExit):
         script.main(_argv(data, "--fit-split", "nope"))
+    with pytest.raises(SystemExit):
+        script.main(_argv(data, "--max-false-mixed", "2"))
     missing = _argv(data)
     missing[missing.index("--model") + 1] = str(data["root"] / "missing.joblib")
     with pytest.raises(SystemExit):

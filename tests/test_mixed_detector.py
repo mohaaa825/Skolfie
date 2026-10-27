@@ -305,3 +305,29 @@ def test_highlight_merges_adjacent_same_label():
     assert spans[1]["p"] == pytest.approx(0.8)
     assert [s["label"] for s in highlight(text, chunks, threshold=0.05)] == ["ai"]
     assert highlight(text, []) == []
+
+
+def test_fit_rule_caps_false_mixed():
+    # Some pure human texts have chunks that disagree as much as half the Mixed texts do.
+    # Best macro-F1 calls them Mixed too; the cap must pick a stricter rule instead.
+    rows = ([scored_row(0.1, [0.05, 0.9])] * 3 + [scored_row(0.2, [0.1, 0.2])] * 7   # human
+            + [scored_row(0.9, [0.9, 0.95])] * 10                                 # ai
+            + [scored_row(0.5, [0.02, 0.99])] * 5 + [scored_row(0.5, [0.05, 0.9])] * 5)  # mixed
+    labels = ["human"] * 10 + ["ai"] * 10 + ["mixed"] * 10
+    grid = {"lo": [0.01, 0.05, 0.1], "hi": [0.85, 0.9, 0.98]}
+    loose, _ = fit_rule(ChunkRule, rows, labels, grid=grid)
+    capped, _ = fit_rule(ChunkRule, rows, labels, grid=grid, max_false_mixed=0.1)
+    m_loose = three_way_metrics(labels, loose.predict(rows))
+    m_capped = three_way_metrics(labels, capped.predict(rows))
+    assert m_loose["human_to_mixed_rate"] == pytest.approx(0.3)
+    assert m_loose["mixed_recall"] == 1.0
+    assert m_capped["human_to_mixed_rate"] == 0.0 and m_capped["ai_to_mixed_rate"] == 0.0
+    assert m_capped["mixed_recall"] == 0.5
+
+    notes = []
+    impossible = [scored_row(0.1, [0.01, 0.99])] * 2 + [scored_row(0.5, [0.01, 0.99])] * 2
+    rule, _ = fit_rule(ChunkRule, impossible, ["human"] * 2 + ["mixed"] * 2,
+                       grid={"lo": [0.05], "hi": [0.9]}, max_false_mixed=0.0, log=notes.append)
+    assert rule.lo == 0.05 and "no ChunkRule setting" in notes[0]
+    with pytest.raises(ValueError):
+        fit_rule(ChunkRule, rows, labels, max_false_mixed=1.5)
