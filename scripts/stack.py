@@ -107,14 +107,26 @@ class _LookupScorer:
         return np.array([self.table[text_key(t)] for t in texts], dtype=np.float64)
 
 
+# A text in two splits (test and test_short overlap) is scored twice. GPU
+# models in fp16 give it slightly different scores depending on what else was
+# in its batch; anything larger than this means the file mixes different runs.
+MAX_SCORE_SPREAD = 0.05
+
+
 def load_member(path: Path) -> Any:
+    """One P(ai) per id from a predictions file (the mean when scored more than once)."""
     import pandas as pd
 
     df = pd.read_parquet(path, columns=["id", "p_ai"])
     per_id = df.groupby("id")["p_ai"]
-    if (per_id.max() - per_id.min()).max() > 1e-9:
-        raise ValueError(f"{path}: the same id has different scores in different splits")
-    return per_id.first()
+    spread = per_id.max() - per_id.min()
+    if spread.max() > MAX_SCORE_SPREAD:
+        raise ValueError(f"{path}: the same id has scores up to {spread.max():.3f} apart in "
+                         "different splits; is the file from more than one run?")
+    if spread.max() > 0:
+        print(f"[note] {path}: {int((spread > 0).sum()):,} ids scored slightly differently in "
+              f"different splits (max {spread.max():.1e}); using the mean")
+    return per_id.mean()
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
