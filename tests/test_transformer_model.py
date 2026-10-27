@@ -331,3 +331,50 @@ def test_bad_hyperparameters_raise() -> None:
         TransformerModel(batch_size=0)
     with pytest.raises(ValueError):
         TransformerModel(eval_fraction=0.6)
+
+
+def test_chunk_training_adds_labelled_chunks_of_training_texts_only(tokenizer, corpus,
+                                                                    monkeypatch) -> None:
+    train, test = corpus
+    texts, labels = train["text"].tolist(), train["label"].tolist()
+    seen = {}
+    model = make(tokenizer, chunk_augment=2, chunk_words=8, epochs=1)
+    original = model._train
+
+    def spy(all_texts, y, feats, train_idx, eval_idx):
+        seen.update(texts=all_texts, y=y, train_idx=train_idx, eval_idx=eval_idx)
+        return original(all_texts, y, feats, train_idx, eval_idx)
+
+    monkeypatch.setattr(model, "_train", spy)
+    model.fit(texts, labels)
+    assert model.name == "transformer-chunks"
+
+    n = len(texts)
+    added = seen["texts"][n:]
+    assert len(added) == model.n_chunks_ > 0
+    assert seen["train_idx"].size == n - seen["eval_idx"].size + len(added)
+    assert set(range(n, n + len(added))) <= set(seen["train_idx"].tolist())
+    held_out = {texts[i] for i in seen["eval_idx"]}
+    y_text = dict(zip(texts, seen["y"][:n]))
+    for chunk, label in zip(added, seen["y"][n:]):
+        parents = [t for t in texts if chunk in t and t not in held_out]
+        assert parents and any(y_text[t] == label for t in parents)
+        assert len(chunk.split()) < max(len(t.split()) for t in parents)
+    assert model.params()["n_chunks"] == len(added)
+    assert model.predict_proba(test["text"].tolist()).shape == (len(test),)
+
+    # Models saved before chunk training existed still load and report.
+    state = model.__getstate__()
+    for key in ("chunk_augment", "chunk_words", "n_chunks_"):
+        state.pop(key)
+    old = TransformerModel.__new__(TransformerModel)
+    old.__setstate__(state)
+    assert old.chunk_augment == 0 and "n_chunks" not in old.params()
+
+
+def test_chunk_training_options_are_validated() -> None:
+    with pytest.raises(ValueError):
+        TransformerModel(chunk_augment=-1)
+    with pytest.raises(ValueError):
+        TransformerModel(chunk_words=0)
+    assert TransformerModel().name == "transformer"

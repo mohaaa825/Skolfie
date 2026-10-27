@@ -362,6 +362,7 @@ FEATURE_SPECS = {
 TRANSFORMER_SPECS = {
     "transformer": {"use_features": True},
     "transformer-text": {"use_features": False},
+    "transformer-chunks": {"use_features": True, "chunk_augment": 1},
 }
 # make_scorer options that only the transformer model takes.
 _TRANSFORMER_ONLY = ("model_name", "max_length", "epochs", "batch_size")
@@ -371,7 +372,7 @@ def make_scorer(spec: str, seed: int = 0, **options: Any) -> Any:
     """
     Build a scorer from a CLI spec: length | tfidf | ensemble | ensemble:PATH |
     joblib:PATH | features | features-nolm | features-rf | features-nolm-rf |
-    transformer | transformer-text.
+    transformer | transformer-text | transformer-chunks.
 
     `options` go to `FeatureModel` (cache_dir, lm_model, lm_batch_size, ...)
     and `TransformerModel` (also model_name, max_length, epochs, batch_size)
