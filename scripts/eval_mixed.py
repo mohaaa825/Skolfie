@@ -50,6 +50,13 @@ def _positive_int(value: str) -> int:
     return n
 
 
+def _share(value: str) -> float:
+    x = float(value)
+    if not 0 <= x <= 1:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return x
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="eval_mixed.py",
@@ -70,6 +77,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Chunk size in words (default: 60).")
     parser.add_argument("--min-words", type=_positive_int, default=25,
                         help="Smallest chunk in words (default: 25).")
+    parser.add_argument("--max-false-mixed", type=_share, default=0.05,
+                        help="Tune the rules only among settings that call at most this share "
+                             "of pure human texts, and of pure AI texts, Mixed on the fit set "
+                             "(default: 0.05; 1 turns the cap off).")
     parser.add_argument("--batch-size", type=_positive_int, default=4096,
                         help="Texts per predict_proba call (default: 4096).")
     parser.add_argument("--out-dir", type=Path)
@@ -107,6 +118,9 @@ def render_md(report: dict[str, Any]) -> str:
         f"- chunks of about {report['chunking']['target_words']} words "
         f"(min {report['chunking']['min_words']}); "
         f"{report['chunking']['mean_chunks']:.1f} chunks per text on average",
+        "- rules tuned for macro-F1 on the fit set"
+        + (f", calling at most {report['max_false_mixed']:.0%} of pure texts Mixed"
+           if report.get("max_false_mixed", 1) < 1 else ""),
         f"- corpus `{report.get('corpus_version') or 'unversioned'}`, git "
         f"`{(report.get('git') or {}).get('commit') or 'unknown'}`"[:200],
         "",
@@ -119,9 +133,11 @@ def render_md(report: dict[str, Any]) -> str:
         rows.append([name, _fmt(m["macro_f1"]), _fmt(m["accuracy"]),
                      _fmt(m["per_class"]["human"]["f1"]), _fmt(m["per_class"]["ai"]["f1"]),
                      _fmt(m["per_class"]["mixed"]["f1"]), _pct(m["mixed_recall"]),
-                     _pct(m["human_to_ai_rate"]), json.dumps(r["params"])])
+                     _pct(m["human_to_ai_rate"]), _pct(m.get("human_to_mixed_rate")),
+                     _pct(m.get("ai_to_mixed_rate")), json.dumps(r["params"])])
     lines += _table(["rule", "macro-F1", "accuracy", "F1 human", "F1 AI", "F1 mixed",
-                     "mixed found", "human → AI", "tuned on fit set"], rows)
+                     "mixed found", "human → AI", "human → mixed", "AI → mixed",
+                     "tuned on fit set"], rows)
 
     chunk = rules["chunk"]["metrics"]["confusion"]
     lines += ["", "### Confusion, chunk rule (rows: truth, columns: prediction)", ""]
@@ -213,7 +229,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rules: dict[str, Any] = {}
     preds: dict[str, np.ndarray] = {}
     for name, cls in (("chunk", ChunkRule), ("whole_text", WholeTextRule)):
-        rule, fit_f1 = fit_rule(cls, scored["fit"], fit_df["label3"].tolist())
+        rule, fit_f1 = fit_rule(cls, scored["fit"], fit_df["label3"].tolist(),
+                                max_false_mixed=args.max_false_mixed)
         preds[name] = rule.predict(scored["eval"])
         rules[name] = {"params": {k: v for k, v in vars(rule).items()},
                        "fit_macro_f1": fit_f1,
@@ -244,6 +261,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                  for key, df in sets.items()},
         "chunking": {"target_words": args.target_words, "min_words": args.min_words,
                      "mean_chunks": float(np.mean(n_chunks))},
+        "max_false_mixed": args.max_false_mixed,
         "rules": rules, "by_pattern": by_pattern, "spans": spans, "seed": args.seed,
         "git": git_info(),
         "seconds": {"score": round(score_seconds, 1),

@@ -20,12 +20,15 @@ Rules (3-way labels, `LABELS3`)
                    or Human from the whole-text score at 0.5.
     WholeTextRule  baseline without chunks: Human below lo, AI above hi, Mixed
                    in between (lo == hi never says Mixed).
-    `fit_rule()` grid-searches either rule's parameters for 3-way macro-F1.
+    `fit_rule()` grid-searches either rule's parameters for 3-way macro-F1,
+    optionally only among settings that call at most `max_false_mixed` of the
+    pure human texts, and of the pure AI texts, Mixed.
 
 Metrics
     three_way_metrics  macro-F1, accuracy, per-class precision / recall / F1,
-                       the confusion matrix, the share of human texts called AI
-                       and the recall of Mixed.
+                       the confusion matrix, the share of human texts called AI,
+                       the shares of pure human / AI texts called Mixed and the
+                       recall of Mixed.
     span_metrics       on Mixed texts: character-level precision / recall / F1 of
                        the predicted AI chunks (whitespace ignored) and, for
                        texts with one human/AI boundary, the boundary error in
@@ -205,16 +208,26 @@ def _steps(start: float, stop: float, step: float) -> list[float]:
 def default_grid(rule_cls: type) -> dict[str, list]:
     """The parameter grid `fit_rule` searches when none is given."""
     if rule_cls is ChunkRule:
-        return {"lo": _steps(0.05, 0.4, 0.05), "hi": _steps(0.6, 0.95, 0.05),
-                "min_share": [0.0, 0.1, 0.2]}
+        return {"lo": [0.01, 0.02] + _steps(0.05, 0.4, 0.05),
+                "hi": _steps(0.6, 0.95, 0.05) + [0.98, 0.99],
+                "min_share": [0.0, 0.1, 0.2, 0.3], "min_chunks": [2, 3]}
     if rule_cls is WholeTextRule:
         vals = _steps(0.05, 0.95, 0.05)
         return {"lo": vals, "hi": vals}
     raise ValueError(f"no default grid for {rule_cls!r}")
 
 
+def _false_mixed_rate(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """The larger of the shares of pure human and of pure AI texts called Mixed."""
+    rates = [float(np.mean(y_pred[y_true == c] == "mixed"))
+             for c in ("human", "ai") if np.any(y_true == c)]
+    return max(rates) if rates else 0.0
+
+
 def fit_rule(rule_cls: type, scored: Sequence[dict], labels3: Sequence[str],
-             grid: dict[str, Sequence] | None = None) -> tuple[Any, float]:
+             grid: dict[str, Sequence] | None = None,
+             max_false_mixed: float | None = None,
+             log: Callable[[str], Any] | None = print) -> tuple[Any, float]:
     """
     Exhaustive grid search for the rule parameters with the best 3-way macro-F1.
 
@@ -222,9 +235,16 @@ def fit_rule(rule_cls: type, scored: Sequence[dict], labels3: Sequence[str],
     parameters not in the grid keep the class defaults. Combinations are tried
     in a fixed order (parameter names sorted, values in the given order) and
     the first one reaching the best score wins, so the result is deterministic.
-    For WholeTextRule, combinations with lo > hi are skipped. Returns
-    (fitted rule, its macro-F1).
+    For WholeTextRule, combinations with lo > hi are skipped.
+
+    `max_false_mixed` (a share in [0, 1]) keeps only combinations that call
+    at most that share of the pure human texts, and of the pure AI texts,
+    Mixed. When none does, the combination with the lowest such share wins
+    (best macro-F1 among ties) and a note is logged. Returns (fitted rule, its
+    macro-F1).
     """
+    if max_false_mixed is not None and not 0 <= max_false_mixed <= 1:
+        raise ValueError("max_false_mixed must be between 0 and 1")
     y_true = _check_labels(labels3)
     if len(y_true) != len(scored):
         raise ValueError(f"{len(scored)} scored texts but {len(y_true)} labels")
@@ -246,16 +266,26 @@ def fit_rule(rule_cls: type, scored: Sequence[dict], labels3: Sequence[str],
             return rule.predict(scored)
 
     base = rule_cls()
-    best_rule, best_score = None, -math.inf
+    cap = math.inf if max_false_mixed is None else max_false_mixed + 1e-12
+    # Ranked by (meets the cap, lowest false-Mixed share if not, macro-F1).
+    best_rule, best_key, best_score = None, None, -math.inf
     for values in itertools.product(*(list(grid[k]) for k in names)):
         rule = replace(base, **dict(zip(names, values)))
         if rule_cls is WholeTextRule and rule.lo > rule.hi:
             continue
-        score = _macro_f1(y_true, predict(rule))
-        if score > best_score + 1e-12:
-            best_rule, best_score = rule, score
+        y_pred = predict(rule)
+        score = _macro_f1(y_true, y_pred)
+        false_mixed = _false_mixed_rate(y_true, y_pred) if max_false_mixed is not None else 0.0
+        ok = false_mixed <= cap
+        key = (ok, 0.0 if ok else -round(false_mixed, 12), score)
+        if best_key is None or key[:2] > best_key[:2] or (
+                key[:2] == best_key[:2] and score > best_key[2] + 1e-12):
+            best_rule, best_key, best_score = rule, key, score
     if best_rule is None:
         raise ValueError("the grid has no valid parameter combination")
+    if not best_key[0] and log is not None:
+        log(f"[mixed] no {rule_cls.__name__} setting keeps false Mixed at or below "
+            f"{max_false_mixed:.1%}; using the lowest ({-best_key[1]:.1%})")
     return best_rule, float(best_score)
 
 
@@ -297,7 +327,8 @@ def three_way_metrics(y_true: Sequence[str], y_pred: Sequence[str]) -> dict[str,
 
     Returns n, accuracy, macro_f1, per_class {label: {precision, recall, f1,
     support, n_pred}}, confusion {true: {pred: count}} over all of `LABELS3`,
-    human_to_ai_rate (share of true-human texts called AI) and mixed_recall.
+    human_to_ai_rate (share of true-human texts called AI), human_to_mixed_rate
+    and ai_to_mixed_rate (shares of pure texts called Mixed) and mixed_recall.
     A class never predicted has precision 0; a class absent from y_true has
     recall 0. macro_f1 averages F1 over the classes that occur in y_true or
     y_pred (a class in neither is left out). Rates are NaN without texts of
@@ -309,6 +340,7 @@ def three_way_metrics(y_true: Sequence[str], y_pred: Sequence[str]) -> dict[str,
     per = _per_class(yt, yp)
     confusion = {t: {p: int(np.sum((yt == t) & (yp == p))) for p in LABELS3} for t in LABELS3}
     n_human = per["human"]["support"]
+    n_ai = per["ai"]["support"]
     return {
         "n": int(yt.size),
         "accuracy": float(np.mean(yt == yp)) if yt.size else math.nan,
@@ -316,6 +348,8 @@ def three_way_metrics(y_true: Sequence[str], y_pred: Sequence[str]) -> dict[str,
         "per_class": per,
         "confusion": confusion,
         "human_to_ai_rate": confusion["human"]["ai"] / n_human if n_human else math.nan,
+        "human_to_mixed_rate": confusion["human"]["mixed"] / n_human if n_human else math.nan,
+        "ai_to_mixed_rate": confusion["ai"]["mixed"] / n_ai if n_ai else math.nan,
         "mixed_recall": per["mixed"]["recall"] if per["mixed"]["support"] else math.nan,
     }
 
