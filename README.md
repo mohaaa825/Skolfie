@@ -24,7 +24,8 @@ a Gradio app for analysing text, collecting feedback and retraining.
 Done: (1) repo cleanup, (2) a 259k-text corpus from HC3, M4GT and
 AuTexTification, (3) held-out evaluation with length and TF-IDF baselines,
 (4) the feature model (style + GPT-2 + Delta features into LightGBM),
-(5) DistilBERT + features. Next: (6) a calibrated combiner, (7) Mixed
+(5) DistilBERT + features, (6) a calibrated combiner with Human /
+Uncertain / AI verdicts. Next: (7) Mixed
 human/AI detection by chunks, (8) explanations, (9) evasion tests,
 (10) fairness checks, (11) API/CLI/web packaging, (12) retraining from
 feedback.
@@ -163,6 +164,30 @@ needs a GPU; use [`notebooks/transformer.ipynb`](notebooks/transformer.ipynb)
 on a Colab T4. `--hf-model`, `--max-length`, `--epochs` and `--batch-size`
 change the defaults.
 
+### Calibrated combiner and verdicts (roadmap step 6)
+
+`scripts/stack.py` combines models from the predictions they saved with
+`--save-predictions`: a logistic regression over their logits, fitted on
+`val` (which none of them trained on), gives one calibrated P(ai). It also
+sets the verdict cut-offs on `val`: **AI** only where at most `--max-fpr`
+(default 1%) of human texts score, **Human** only where at most
+`--max-miss` (default 5%) of AI texts score, **Uncertain** in between. The
+report card adds a verdict table per split.
+
+```bash
+python scripts/stack.py --corpus data/processed/corpus.parquet \
+    --splits data/processed/splits.parquet \
+    --member features=reports/features/predictions.parquet \
+    --member transformer=reports/transformer/predictions.parquet \
+    --model-path features=models/features.joblib \
+    --model-path transformer=models/transformer.joblib \
+    --save-model models/stacked.joblib --out-dir reports/stacked
+```
+
+The saved `StackedModel` loads the member models itself; `predict()`
+returns the verdicts. In Colab use
+[`notebooks/stack.ipynb`](notebooks/stack.ipynb) (CPU is enough).
+
 ## Train (old prototype)
 
 ```bash
@@ -216,7 +241,8 @@ skolfie/
 │   │   ├── ensemble.py            # AIDetectorModel: the old prototype
 │   │   ├── baselines.py           # Length and TF-IDF baselines, make_scorer()
 │   │   ├── feature_model.py       # FeatureModel: style + GPT-2 + Delta into LightGBM
-│   │   └── transformer_model.py   # TransformerModel: DistilBERT + features
+│   │   ├── transformer_model.py   # TransformerModel: DistilBERT + features
+│   │   └── stacker.py             # Calibrated stack + Human/Uncertain/AI cut-offs
 │   ├── eval/                      # Splits, metrics, report cards
 │   ├── data/
 │   │   ├── schema.py              # Record schema every corpus source maps into
@@ -230,6 +256,7 @@ skolfie/
 │   ├── build_corpus.py            # One-command corpus build
 │   ├── make_splits.py             # Versioned evaluation splits
 │   ├── evaluate.py                # Report card for any model, and --compare
+│   ├── stack.py                   # Calibrated combiner + verdict cut-offs
 │   ├── generate_ai_texts.py       # Fresh AI text from current models
 │   └── train.py                   # Training CLI (--data, --feedback, --seed-demo)
 ├── tests/
