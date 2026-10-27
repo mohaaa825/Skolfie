@@ -21,6 +21,10 @@ sampled down stratified by label), and returns a JSON-able report dict.
     predictions.parquet (optional) id, split, label, p_ai
 
 `compare_reports()` renders several report.json files side by side.
+
+A report may also carry `verdicts` (cut-offs and the share of Human /
+Uncertain / AI verdicts per split, added by `scripts/stack.py`); it is
+rendered when present.
 """
 
 from __future__ import annotations
@@ -283,6 +287,12 @@ def _fmt(value: Any, digits: int = 3) -> str:
     return str(value)
 
 
+def _pct(value: Any) -> str:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return "n/a"
+    return f"{100 * value:.1f}%"
+
+
 def _table(header: Sequence[str], rows: Iterable[Sequence[Any]]) -> list[str]:
     lines = ["| " + " | ".join(header) + " |",
              "|" + "|".join("---" if i == 0 else "---:" for i in range(len(header))) + "|"]
@@ -333,6 +343,22 @@ def render_report_md(report: dict[str, Any]) -> str:
     lines += _table(["split", "n"] + [label for _, label in HEADLINE] + ["predict"], rows)
     if notes:
         lines += ["", "Notes:", ""] + notes
+
+    verdict_info = report.get("verdicts") or {}
+    if verdict_info.get("splits"):
+        cut = verdict_info["cutoffs"]
+        lines += ["", "## Verdicts", "",
+                  f"AI if P(ai) > {cut['ai_threshold']:.4f} (set so that at most "
+                  f"{cut['max_fpr']:.0%} of human texts in the fit split score above it); "
+                  f"Human if P(ai) < {cut['human_threshold']:.4f} (at most "
+                  f"{cut['max_miss']:.0%} of AI texts below it); Uncertain in between.", ""]
+        rows = []
+        for split, t in verdict_info["splits"].items():
+            h, a = t["human_texts"], t["ai_texts"]
+            rows.append([split, _pct(h["ai"]), _pct(h["uncertain"]), _pct(h["human"]),
+                         _pct(a["ai"]), _pct(a["uncertain"]), _pct(a["human"])])
+        lines += _table(["split", "human → AI", "human → uncertain", "human → human",
+                         "AI → AI", "AI → uncertain", "AI → human"], rows)
 
     importance = model.get("feature_importance") or []
     if importance:
