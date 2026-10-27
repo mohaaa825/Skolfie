@@ -29,6 +29,7 @@ rendered when present.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -150,6 +151,39 @@ def _feature_importance(scorer: Any) -> list[dict[str, Any]]:
     return list(method()) if callable(method) else []
 
 
+def _text_key(text: str) -> str:
+    return hashlib.sha1(" ".join(str(text).split()).encode("utf-8")).hexdigest()
+
+
+def _filter_extra_train(extra: pd.DataFrame, corpus: pd.DataFrame, splits: pd.DataFrame,
+                        eval_splits: Sequence[str], log: Any) -> tuple[pd.DataFrame, dict]:
+    """Drop extra train rows that overlap an evaluation split; summarise the rest."""
+    missing = {"text", "label"} - set(extra.columns)
+    if missing:
+        raise ValueError(f"extra train data is missing column(s): {', '.join(sorted(missing))}")
+    eval_ids = splits.loc[splits["split"].isin(eval_splits), "id"]
+    eval_ids = set(eval_ids[eval_ids.isin(corpus.index)])
+    eval_keys = {_text_key(t) for t in corpus.loc[list(eval_ids), "text"]}
+    overlap = np.array([_text_key(t) in eval_keys for t in extra["text"]], dtype=bool)
+    if "orig_id" in extra:
+        overlap |= extra["orig_id"].isin(eval_ids).to_numpy()
+    kept = extra[~overlap]
+    y = to_binary(kept["label"].tolist())
+    info: dict[str, Any] = {"n_given": len(extra), "n_dropped_eval_overlap": int(overlap.sum()),
+                            "n": len(kept), "n_ai": int(y.sum()), "n_human": len(y) - int(y.sum())}
+    if "extra_source" in extra:
+        info["files"] = sorted(map(str, pd.unique(extra["extra_source"])))
+    for col, key in (("extra_source", "by_file"), ("attack", "by_attack")):
+        if col in kept:
+            info[key] = {str(k): int(v)
+                         for k, v in kept[col].value_counts().sort_index().items()}
+    if overlap.any():
+        log(f"[fit] dropped {int(overlap.sum())} extra train texts that are (or come from) "
+            "evaluation-split texts")
+    log(f"[fit] + {len(kept)} extra train texts ({info['n_ai']} ai / {info['n_human']} human)")
+    return kept, info
+
+
 def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
                    model_spec: str | None = None,
                    corpus_path: str | os.PathLike[str] | None = None,
@@ -157,8 +191,15 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
                    splits_manifest: dict[str, Any] | None = None,
                    max_train: int | None = None, max_eval: int | None = None,
                    seed: int = 0, eval_splits: Sequence[str] = EVAL_SPLITS,
+                   extra_train: pd.DataFrame | None = None,
                    log: Any = print) -> tuple[dict[str, Any], pd.DataFrame]:
-    """Fit on `train`, score every eval split. Returns (report dict, predictions frame)."""
+    """Fit on `train`, score every eval split. Returns (report dict, predictions frame).
+
+    `extra_train` (columns text, label; optional orig_id, attack, extra_source)
+    is appended to the train texts after sampling, e.g. attacked copies for
+    adversarial training. Rows whose text, or `orig_id`, is in an evaluation
+    split are dropped first.
+    """
     started = time.time()
     manifest = splits_manifest or {}
     available = set(splits["split"].unique())
@@ -167,7 +208,8 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
     pretrained = bool(getattr(scorer, "pretrained", False))
     train_info: dict[str, Any] = {"pretrained": pretrained}
     if pretrained:
-        log(f"[fit] {scorer.name}: pretrained, skipping training")
+        log(f"[fit] {scorer.name}: pretrained, skipping training"
+            + (" (extra train texts ignored)" if extra_train is not None else ""))
         train_info.update({"n": 0, "n_human": 0, "n_ai": 0, "n_available": 0,
                            "fit_seconds": 0.0})
     else:
@@ -179,15 +221,21 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
             raise ValueError("the train split needs both human and ai texts")
         log(f"[fit] {scorer.name} on {len(train_df)} train texts "
             f"({int(y.sum())} ai / {len(y) - int(y.sum())} human)")
+        texts, labels = train_df["text"].tolist(), train_df["label"].tolist()
+        if extra_train is not None:
+            extra, train_info["extra_train"] = _filter_extra_train(
+                extra_train, corpus, splits, [s for s in eval_splits if s in available], log)
+            texts += extra["text"].tolist()
+            labels += extra["label"].tolist()
         t0 = time.time()
-        scorer.fit(train_df["text"].tolist(), train_df["label"].tolist())
+        scorer.fit(texts, labels)
         fit_seconds = time.time() - t0
         log(f"[fit] done in {fit_seconds:.1f}s")
         train_info.update({"n": len(train_df), "n_human": len(y) - int(y.sum()),
                            "n_ai": int(y.sum()), "n_available": n_available,
                            "n_missing_from_corpus": missing,
                            "fit_seconds": round(fit_seconds, 3)})
-        del train_df
+        del train_df, texts, labels
 
     # --- evaluate ---------------------------------------------------------- #
     results: dict[str, Any] = {}
@@ -312,6 +360,10 @@ def render_report_md(report: dict[str, Any]) -> str:
     else:
         train_line = (f"{train['n']:,} texts ({train['n_ai']:,} ai / {train['n_human']:,} human) "
                       f"of {train['n_available']:,} in `train`, fit {train['fit_seconds']:.1f}s")
+        extra = train.get("extra_train")
+        if extra:
+            train_line += (f"; plus {extra['n']:,} extra texts ({extra['n_ai']:,} ai / "
+                           f"{extra['n_human']:,} human, e.g. attacked copies) from --extra-train")
     lines = [
         f"# Report card: {model['name']}",
         "",
