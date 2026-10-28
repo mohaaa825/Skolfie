@@ -24,6 +24,8 @@ StackedModel
     The scorer used after training: loads the member models (joblib files,
     lazily), stacks their scores and applies the cut-offs. `predict_proba()`
     follows the common scorer contract; `predict()` returns the verdicts.
+    Texts are normalised once (`scoring_texts`) before the members
+    see them, so members of any type get the Unicode defence.
     The member paths are stored as given to `stack.py --model-path` (on
     Colab, absolute Drive paths); on another machine, copy the member files
     there or point `model.members[name]` at their new location. Loading a
@@ -39,6 +41,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from skolfie.eval.metrics import to_binary
+from skolfie.models.feature_model import scoring_texts
 
 CALIBRATIONS = ("platt", "isotonic")
 VERDICTS = ("human", "uncertain", "ai")
@@ -229,7 +232,7 @@ class StackedModel:
         return self
 
     def member_scores(self, texts: Sequence[str]) -> np.ndarray:
-        texts = list(texts)
+        texts = scoring_texts(texts)
         return np.column_stack([self._member(n).predict_proba(texts) for n in self.members])
 
     def predict_proba(self, texts: Sequence[str]) -> np.ndarray:

@@ -23,6 +23,8 @@ from skolfie.features.style import STYLE_FEATURES
 from skolfie.mixed.chunking import chunk_spans
 from skolfie.mixed.detector import ChunkRule
 from skolfie.models.baselines import LengthBaseline, TfidfLRBaseline
+from skolfie.robust.attacks import homoglyph_text, text_rng, zero_width_text
+from skolfie.robust.normalize import obfuscation_note, obfuscation_stats
 from tests.test_evaluate import make_corpus, make_splits
 from tests.test_stacker import _load_script
 
@@ -164,7 +166,10 @@ def test_explainer_output_shape(trained, tmp_path: Path) -> None:
     explainer = Explainer(tmp_path / "length.joblib", tmp_path / "features.joblib",
                           chunk_rule=ChunkRule(lo=0.45, hi=0.55), chunker=CHUNKER,
                           batch_size=4)
-    texts = trained["texts"][:10] + [trained["texts"][0] + " " + trained["texts"][-1], ""]
+    attacked = zero_width_text(homoglyph_text(trained["texts"][1], 0.3, text_rng(0, "h", "")),
+                               0.3, text_rng(0, "z", ""))
+    texts = trained["texts"][:10] + [trained["texts"][0] + " " + trained["texts"][-1], "",
+                                     attacked]
     out = explainer.explain_many(texts)
     assert len(out) == len(texts)
     json.loads(json.dumps(out, allow_nan=False))  # plain JSON as it is
@@ -172,7 +177,8 @@ def test_explainer_output_shape(trained, tmp_path: Path) -> None:
     p = trained["length"].predict_proba(texts)
     for ex, text, p_ai in zip(out, texts, p):
         assert set(ex) == {"label", "verdict", "p_ai", "chunks", "highlights", "top_features",
-                           "feature_model"}
+                           "feature_model", "obfuscation"}
+        assert ex["obfuscation"] == obfuscation_stats(text)
         assert ex["verdict"] == ("ai" if p_ai >= 0.5 else "human")
         assert ex["label"] in (ex["verdict"], "mixed")
         assert ex["p_ai"] == pytest.approx(p_ai)
@@ -192,6 +198,12 @@ def test_explainer_output_shape(trained, tmp_path: Path) -> None:
     rule_says = [len(ex["chunks"]) >= 2 and max(c["p"] for c in ex["chunks"]) >= 0.55
                  and min(c["p"] for c in ex["chunks"]) <= 0.45 for ex in out]
     assert scored_mixed == rule_says
+    # The attacked copy is flagged, scored like the original, and its chunk
+    # offsets index the attacked text as given.
+    assert out[-1]["obfuscation"]["invisible"] > 0 and out[-1]["obfuscation"]["lookalikes"] > 0
+    assert all(v == 0 for ex in out[:-1] for v in ex["obfuscation"].values())
+    assert out[-1]["p_ai"] == pytest.approx(out[1]["p_ai"])
+    assert out[-1]["chunks"][-1]["end"] == len(attacked)
     assert explainer.explain(texts[0]) == out[0]
     info = explainer.info()
     assert info["chunk_rule"]["lo"] == 0.45 and info["verdict_model"] == "length"
@@ -282,6 +294,22 @@ def test_render_notes_when_the_feature_model_disagrees() -> None:
     assert note.startswith("The style features alone point to human (P(ai) 0.37")
     assert note in render_html([ex], [text])
     assert f"> {note}" in render_markdown([ex], [text], cases=[{"id": "a"}])
+
+
+def test_render_warns_about_obfuscation() -> None:
+    from skolfie.explain.render import render_html, render_markdown
+
+    text = "Some text with hidden characters."
+    ex = _fake_explanation(text)
+    for page in (render_html([ex], [text]), render_markdown([ex], [text])):
+        assert "invisible" not in page and "look-alike" not in page
+    ex["obfuscation"] = {"invisible": 3, "lookalikes": 1}
+    note = obfuscation_note(ex["obfuscation"])
+    assert note.startswith("The text contains 3 invisible characters and 1 look-alike letter ")
+    assert f'<p class="warn">{note}</p>' in render_html([ex], [text])
+    assert f"> {note}" in render_markdown([ex], [text])
+    ex["obfuscation"] = {"invisible": 0, "lookalikes": 2}
+    assert "2 look-alike letters (" in render_markdown([ex], [text])
 
 
 def test_render_html_escapes() -> None:

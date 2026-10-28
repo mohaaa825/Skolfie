@@ -22,10 +22,17 @@ together, for each text:
                   side (P(ai) on the other side of 0.5 than an AI / human
                   verdict), so its top features do not explain the verdict,
                   and None for an uncertain verdict
+    obfuscation   {"invisible", "lookalikes"}: the `obfuscation_stats` of the
+                  text as given, i.e. how many invisible characters and
+                  look-alike letters the models' normalisation undid
+                  (`skolfie.robust.normalize`); non-zero counts are a hint
+                  that the text was disguised to evade detection
 
 Offsets are character offsets into the text, so `text[start:end]` is the
-span. Everything is plain Python (floats, ints, strings, None), so the dict
-is JSON as it is; step 11's API returns it.
+span: chunks are cut from the text as given, and each chunk is normalised
+inside the scorers' predict_proba, so the offsets never shift. Everything
+is plain Python (floats, ints, strings, None), so the dict is JSON as it
+is; step 11's API returns it.
 
 The verdict model is any scorer with `predict_proba(texts)`. Its verdict
 comes from its `cutoffs` (a `StackedModel`), else from `predict()` when that
@@ -176,6 +183,7 @@ class Explainer:
         from skolfie.eval.report import _json_safe
         from skolfie.explain.contributions import explain_features
         from skolfie.mixed.detector import highlight, score_texts
+        from skolfie.robust.normalize import obfuscation_stats
 
         p = predict_p_ai(self.verdict_model, texts)
         verdicts = self._verdicts(texts, p)
@@ -204,6 +212,7 @@ class Explainer:
                 "feature_model": {
                     **{k: feats[i][k] for k in ("p_ai", "raw_score", "base_value")},
                     "agrees": feature_model_agrees(verdicts[i], feats[i]["p_ai"])},
+                "obfuscation": obfuscation_stats(text),
             }))
         return out
 

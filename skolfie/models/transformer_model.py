@@ -21,6 +21,10 @@ them noisily. Only texts with two or more chunks add any, and the held-out
 texts are split off first, so none of their chunks are trained on.
 The default backbone is `distilbert-base-cased`: case, punctuation and stop
 words are kept, since they carry much of the style signal.
+fit() and predict_proba() first map every text (and every training chunk)
+through `skolfie.robust.normalize.normalize_for_scoring`, which undoes
+invisible characters and look-alike letters, also for models pickled
+before it existed.
 
 Features: the label-free style (+ optional GPT-2) features of
 `FeatureModel.base_features()`, disk-cached by text hash when `cache_dir` is
@@ -79,8 +83,8 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from skolfie.eval.metrics import to_binary
-from skolfie.models.feature_model import FeatureModel
-from skolfie.models.feature_model import as_text as _as_text
+from skolfie.models.feature_model import FeatureModel, scoring_texts
+from skolfie.robust.normalize import normalize_for_scoring
 
 FEATURE_HIDDEN = 64
 DROPOUT = 0.1
@@ -469,7 +473,7 @@ class TransformerModel:
         return [g for g in groups if g["params"]]
 
     def fit(self, texts: Sequence[str], labels: Sequence[Any]) -> "TransformerModel":
-        texts = [_as_text(t) for t in texts]
+        texts = scoring_texts(texts)
         y = to_binary(labels)
         if len(texts) != len(y):
             raise ValueError("texts and labels must have the same length")
@@ -522,7 +526,9 @@ class TransformerModel:
             k = min(self.chunk_augment, len(spans))
             for j in sorted(rng.choice(len(spans), size=k, replace=False)):
                 a, b = spans[j]
-                extra.append(texts[i][a:b])
+                # Cut from the normalised text and normalised again, like a chunk
+                # the Mixed detector cuts from the original text and scores.
+                extra.append(normalize_for_scoring(texts[i][a:b]))
                 extra_y.append(y[i])
         self.n_chunks_ = len(extra)
         self.log(f"[transformer] chunk training: {len(extra):,} chunks of about "
@@ -641,7 +647,7 @@ class TransformerModel:
     def predict_proba(self, texts: Sequence[str]) -> np.ndarray:
         if self._net is None and self._packed is None:
             raise RuntimeError("TransformerModel is not fitted")
-        texts = [_as_text(t) for t in texts]
+        texts = scoring_texts(texts)
         if not texts:
             return np.zeros(0)
         self._ensure_net()

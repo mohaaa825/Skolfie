@@ -8,9 +8,12 @@ render_html      one self-contained page (inline CSS, no scripts, no external
                  per-chunk heatmap (red = scored AI, blue = scored human, the
                  stronger the tint the more confident the chunk score), and
                  the top features with their direction and reason.
+                 A warning line notes texts with invisible characters or
+                 look-alike letters (the explanation's "obfuscation").
 render_markdown  the review sheet: a checklist table to fill in by hand
                  (are the reasons and the highlighted chunks plausible?),
-                 then the details of every case, with each chunk's text.
+                 then the details of every case, with each chunk's text
+                 and the same warning line.
 
 All text that is not a number is escaped (`html.escape` for HTML;
 `md_escape` for Markdown: table-breaking characters, raw HTML and link /
@@ -24,6 +27,7 @@ import math
 from typing import Any, Optional, Sequence
 
 from skolfie.explain.reasons import lookup
+from skolfie.robust.normalize import obfuscation_note
 
 _AI_RGB = (214, 39, 40)
 _HUMAN_RGB = (31, 119, 180)
@@ -37,6 +41,7 @@ h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin: 0 0 8px; }
 .case { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 20px 0; }
 .meta { color: #555; font-size: 0.9rem; margin-bottom: 8px; }
 .note { color: #8a5a00; font-size: 0.9rem; margin: 0 0 8px; }
+.warn { color: #8a5a00; font-weight: 600; font-size: 0.9rem; margin: 0 0 8px; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; color: #fff;
          font-weight: 600; font-size: 0.85rem; }
 .text { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid #eee;
@@ -150,8 +155,10 @@ def render_html(explanations: Sequence[dict], texts: Sequence[str],
         verdict_note = ""
         if ex.get("verdict") and ex["verdict"] != ex["label"]:
             verdict_note = f" (verdict without the chunk rule: {html.escape(ex['verdict'])})"
+        warn = obfuscation_note(ex.get("obfuscation"))
         note = disagreement_note(ex)
-        note = f'<p class="note">{html.escape(note)}</p>' if note else ""
+        note = ((f'<p class="warn">{html.escape(warn)}</p>' if warn else "")
+                + (f'<p class="note">{html.escape(note)}</p>' if note else ""))
         body.append(
             '<section class="case">'
             f"<h2>{html.escape(caption)}</h2>"
@@ -223,7 +230,8 @@ def render_markdown(explanations: Sequence[dict], texts: Sequence[str],
     lines += ["", "## Cases", ""]
     for i, (ex, text, case) in enumerate(zip(explanations, texts, cases), 1):
         fm = ex.get("feature_model") or {}
-        note = disagreement_note(ex)
+        notes = [n for n in (obfuscation_note(ex.get("obfuscation")), disagreement_note(ex))
+                 if n]
         lines += [
             f"### {i}. {md_escape(case.get('id', f'text {i}'))}",
             "",
@@ -233,7 +241,7 @@ def render_markdown(explanations: Sequence[dict], texts: Sequence[str],
                if ex.get("verdict") and ex["verdict"] != ex["label"] else "")
             + f"); feature model P(ai) {_fmt(fm.get('p_ai'))}.",
             "",
-            *([f"> {md_escape(note)}", ""] if note else []),
+            *[line for n in notes for line in (f"> {md_escape(n)}", "")],
             "| # | feature | value | typical human / AI | SHAP (log-odds) | towards | reason |",
             "|---:|---|---:|---:|---:|---|---|",
         ]

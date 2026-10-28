@@ -15,7 +15,7 @@ from tests.fixtures.seed_texts import AI_TEXTS, HUMAN_TEXTS
 EXPECTED_KEYS = {
     "label", "ai_probability", "human_probability", "confidence",
     "ml_ai_probability", "burrows_ai_probability", "burrows_delta_human",
-    "burrows_delta_ai", "burrows_top_words", "top_features", "raw_features",
+    "burrows_delta_ai", "burrows_top_words", "top_features", "raw_features", "obfuscation",
 }
 
 
@@ -66,3 +66,16 @@ def test_save_load_round_trip(trained_model, tmp_path):
     original, restored = trained_model.predict(text), loaded.predict(text)
     assert restored["ai_probability"] == pytest.approx(original["ai_probability"])
     assert restored["label"] == original["label"]
+
+
+def test_predict_undoes_unicode_tricks(trained_model):
+    from skolfie.robust.attacks import homoglyph_text, text_rng, zero_width_text
+
+    text = AI_TEXTS[0]
+    attacked = zero_width_text(homoglyph_text(text, 0.3, text_rng(0, "h", text)), 0.3,
+                               text_rng(0, "z", text))
+    assert attacked != text
+    clean, result = trained_model.predict(text), trained_model.predict(attacked)
+    assert result["ai_probability"] == pytest.approx(clean["ai_probability"])
+    assert clean["obfuscation"] == {"invisible": 0, "lookalikes": 0}
+    assert result["obfuscation"]["invisible"] > 0 and result["obfuscation"]["lookalikes"] > 0
