@@ -26,8 +26,8 @@ AuTexTification, (3) held-out evaluation with length and TF-IDF baselines,
 (4) the feature model (style + GPT-2 + Delta features into LightGBM),
 (5) DistilBERT + features, (6) a calibrated combiner with Human /
 Uncertain / AI verdicts, (7) Mixed human/AI detection by chunks. Code
-done, runs pending: (8) explanations, (9) evasion tests. Next:
-(10) fairness checks, (11) API/CLI/web packaging, (12) retraining from
+done, runs pending: (8) explanations, (9) evasion tests, (10) fairness
+checks. Next: (11) API/CLI/web packaging, (12) retraining from
 feedback.
 
 ## Install
@@ -267,6 +267,32 @@ What it undid is reported as the explanation's `obfuscation` counts and
 shown as a warning in `review.html`, `review.md` and the app, since
 ordinary text rarely contains either.
 
+### Fairness check (roadmap step 10)
+
+`scripts/eval_fairness.py` measures the false-positive rate (human text
+flagged as AI, i.e. P(ai) above the model's AI threshold) per subgroup,
+each with a 95% Wilson interval: corpus human texts of `test` and
+`test_ood_domain` by domain, source, length (<50, 50-99, 100-199, 200-399,
+400+ words) and technical text by length, plus external sets built by
+`scripts/build_fairness_sets.py`: TOEFL essays by non-native writers and
+essays by native writers from Liang et al. (2023, "GPT detectors are biased
+against non-native English writers"; MIT), and ELLIPSE essays by English
+learners by proficiency and grade (Crossley et al. 2023; CC BY 4.0). Human
+essays that GPT-4 polished or simplified are reported apart, never as human
+false positives, and the sets' AI texts as recall. The threshold is the
+model's own `cutoffs["ai_threshold"]` (the stacked model), else the one
+that flags 1% of the `val` human texts. A group is **far above average**
+when its FPR is at least 2x the corpus-wide human FPR, at least 2 points
+above it, and its interval's lower bound is above it; groups under 30
+texts are too small to judge. Each far-above group becomes a sentence in
+`known_limitations.json` for the app ("Essays by non-native English
+writers are flagged as AI 12% of the time (vs 1% for human text in our
+test data). Treat an AI verdict on such text with caution."). With a
+feature model at hand, the report also gives each group's median GPT-2
+perplexity, vocabulary variety and word / sentence length, since
+predictable wording is what trips detectors on non-native writing. In
+Colab use [`notebooks/fairness.ipynb`](notebooks/fairness.ipynb).
+
 ## Train (old prototype)
 
 ```bash
@@ -328,12 +354,13 @@ skolfie/
 │   │   └── detector.py            # Chunk scoring, Mixed rules, span metrics
 │   ├── explain/                   # SHAP reasons, Explainer, review pages
 │   ├── robust/                    # Evasion attacks
-│   ├── eval/                      # Splits, metrics, report cards
+│   ├── eval/                      # Splits, metrics, report cards, fairness rates
 │   ├── data/
 │   │   ├── schema.py              # Record schema every corpus source maps into
 │   │   ├── corpus.py              # Corpus builder: clean, filter, dedupe, Parquet + manifest
 │   │   ├── sources/               # Loaders: hc3, m4gt, autextification, fresh
 │   │   ├── generation/            # Prompt bank + API providers for fresh AI text
+│   │   ├── fairness_sets.py       # External fairness test sets (Liang et al., ELLIPSE)
 │   │   ├── file_parsers.py        # .txt / .docx / .pdf text extraction
 │   │   └── feedback.py            # feedback_data.csv read/write/export
 │   └── app/                       # Gradio app (python -m skolfie.app)
@@ -346,6 +373,8 @@ skolfie/
 │   ├── explain.py                 # Explanation review sheet for random test texts
 │   ├── make_attacks.py            # Attacked test / training sets
 │   ├── eval_robust.py             # Robustness table per attack
+│   ├── build_fairness_sets.py     # Download + build the external fairness sets
+│   ├── eval_fairness.py           # Human FPR per subgroup + known limitations
 │   ├── generate_ai_texts.py       # Fresh AI text from current models
 │   └── train.py                   # Training CLI (--data, --feedback, --seed-demo)
 ├── tests/
@@ -421,3 +450,7 @@ file to `scripts/train.py --feedback` to retrain on it.
 - AI-text detection is probabilistic. Don't base high-stakes decisions on
   this tool alone, such as academic misconduct cases. A human must review
   the result.
+- Detectors flag some human writing more often than other, notably
+  non-native English and short texts. `scripts/eval_fairness.py` measures
+  this per group; see its `known_limitations.json` for the groups where the
+  current model is clearly worse.
