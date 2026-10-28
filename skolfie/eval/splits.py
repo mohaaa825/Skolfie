@@ -246,6 +246,9 @@ def _check_frame(df: pd.DataFrame) -> None:
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"corpus frame is missing column(s) {missing}")
+    n_null = int(df["id"].isna().sum())
+    if n_null:
+        raise ValueError(f"{n_null} corpus row(s) have no id")
     dup = df["id"].duplicated()
     if dup.any():
         raise ValueError(
@@ -502,10 +505,8 @@ def _memberships_sha256(memberships: pd.DataFrame) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+def _tmp_path(path: Path) -> Path:
+    return path.with_name(path.name + ".tmp")
 
 
 @dataclass
@@ -578,13 +579,23 @@ def write_splits(
     table = pa.Table.from_pandas(
         memberships[["id", "split"]].astype(str), schema=PARQUET_SCHEMA, preserve_index=False
     )
-    tmp = parquet_path.with_name(parquet_path.name + ".tmp")
-    pq.write_table(table, tmp, compression="zstd")
-    os.replace(tmp, parquet_path)
-    _atomic_write_text(
-        manifest_path, json.dumps(manifest, indent=2, ensure_ascii=False, default=int) + "\n"
-    )
-    _atomic_write_text(summary_path, summary_md)
+    # All three files go to *.tmp first and are renamed only once all are complete,
+    # so an interrupted run never pairs a new splits.parquet with an old manifest.
+    finals = (parquet_path, manifest_path, summary_path)
+    tmps = [_tmp_path(p) for p in finals]
+    try:
+        pq.write_table(table, tmps[0], compression="zstd")
+        tmps[1].write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False, default=int) + "\n",
+            encoding="utf-8",
+        )
+        tmps[2].write_text(summary_md, encoding="utf-8")
+        for tmp, final in zip(tmps, finals):
+            os.replace(tmp, final)
+    except BaseException:
+        for tmp in tmps:
+            tmp.unlink(missing_ok=True)
+        raise
     return SplitsResult(
         out_dir=out_dir,
         parquet_path=parquet_path,

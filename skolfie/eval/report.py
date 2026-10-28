@@ -21,6 +21,9 @@ sampled down stratified by label), and returns a JSON-able report dict.
     predictions.parquet (optional) id, split, label, p_ai
 
 `compare_reports()` renders several report.json files side by side.
+Every output file is written atomically (`atomic_path`: temporary file,
+then rename), so an interrupted run never leaves a truncated report or
+predictions file for `--compare` or `scripts/stack.py` to read.
 
 A report may also carry `verdicts` (cut-offs and the share of Human /
 Uncertain / AI verdicts per split, added by `scripts/stack.py`); it is
@@ -29,16 +32,17 @@ rendered when present.
 
 from __future__ import annotations
 
-import hashlib
+import contextlib
 import json
 import math
 import os
 import platform
+import secrets
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Iterator, Sequence
 
 import numpy as np
 import pandas as pd
@@ -151,22 +155,35 @@ def _feature_importance(scorer: Any) -> list[dict[str, Any]]:
     return list(method()) if callable(method) else []
 
 
-def _text_key(text: str) -> str:
-    return hashlib.sha1(" ".join(str(text).split()).encode("utf-8")).hexdigest()
+def _text_key(text: Any) -> bytes:
+    """The corpus's own duplicate key: case-folded, punctuation and whitespace removed."""
+    from skolfie.data.corpus import normalized_hash
+
+    return normalized_hash(text if isinstance(text, str) else "")
 
 
 def _filter_extra_train(extra: pd.DataFrame, corpus: pd.DataFrame, splits: pd.DataFrame,
-                        eval_splits: Sequence[str], log: Any) -> tuple[pd.DataFrame, dict]:
-    """Drop extra train rows that overlap an evaluation split; summarise the rest."""
+                        log: Any) -> tuple[pd.DataFrame, dict]:
+    """Drop extra train rows that overlap any non-train split; summarise the rest.
+
+    A row is dropped when its text is a duplicate of an evaluation text in the
+    corpus's sense (`normalized_hash`: case, punctuation and whitespace are
+    ignored) or its `orig_id` is an evaluation id. Every split except `train`
+    counts, not only the ones reported here, so a saved model never trained
+    on a text that a later evaluation might use.
+    """
     missing = {"text", "label"} - set(extra.columns)
     if missing:
         raise ValueError(f"extra train data is missing column(s): {', '.join(sorted(missing))}")
-    eval_ids = splits.loc[splits["split"].isin(eval_splits), "id"]
-    eval_ids = set(eval_ids[eval_ids.isin(corpus.index)])
-    eval_keys = {_text_key(t) for t in corpus.loc[list(eval_ids), "text"]}
+    eval_ids = splits.loc[splits["split"] != TRAIN_SPLIT, "id"]
+    eval_ids = eval_ids[eval_ids.isin(corpus.index)]
+    eval_keys = {_text_key(t) for t in corpus.loc[eval_ids.unique(), "text"]}
     overlap = np.array([_text_key(t) in eval_keys for t in extra["text"]], dtype=bool)
     if "orig_id" in extra:
-        overlap |= extra["orig_id"].isin(eval_ids).to_numpy()
+        overlap |= extra["orig_id"].astype(str).isin(set(eval_ids.astype(str))).to_numpy()
+    else:
+        log("[fit] warning: extra train data has no orig_id column; only texts that "
+            "duplicate an evaluation text can be dropped, not edited copies of one")
     kept = extra[~overlap]
     y = to_binary(kept["label"].tolist())
     info: dict[str, Any] = {"n_given": len(extra), "n_dropped_eval_overlap": int(overlap.sum()),
@@ -197,8 +214,8 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
 
     `extra_train` (columns text, label; optional orig_id, attack, extra_source)
     is appended to the train texts after sampling, e.g. attacked copies for
-    adversarial training. Rows whose text, or `orig_id`, is in an evaluation
-    split are dropped first.
+    adversarial training. Rows whose text, or `orig_id`, is in any non-train
+    split are dropped first (see `_filter_extra_train`).
     """
     started = time.time()
     manifest = splits_manifest or {}
@@ -224,7 +241,7 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
         texts, labels = train_df["text"].tolist(), train_df["label"].tolist()
         if extra_train is not None:
             extra, train_info["extra_train"] = _filter_extra_train(
-                extra_train, corpus, splits, [s for s in eval_splits if s in available], log)
+                extra_train, corpus, splits, log)
             texts += extra["text"].tolist()
             labels += extra["label"].tolist()
         t0 = time.time()
@@ -253,6 +270,9 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
         if p.shape != (len(df),):
             raise ValueError(f"{scorer.name}.predict_proba returned shape {p.shape} "
                              f"for {len(df)} texts")
+        if np.isnan(p).any():
+            raise ValueError(f"{scorer.name}.predict_proba returned NaN for "
+                             f"{int(np.isnan(p).sum())} of {len(p)} texts in {name}")
         p = np.clip(p, 0.0, 1.0)
         metrics = binary_metrics(df["label"].tolist(), p)
         tables = breakdown(df, p)
@@ -311,19 +331,39 @@ def _json_safe(obj: Any) -> Any:
 # --------------------------------------------------------------------------- #
 # Writing / rendering
 # --------------------------------------------------------------------------- #
+@contextlib.contextmanager
+def atomic_path(path: str | os.PathLike[str]) -> Iterator[Path]:
+    """Yield a temporary path next to `path`; it replaces `path` only if the block succeeds.
+
+    The temporary name is unique per call and ends with the target's own
+    name, so writers that pick a format from the extension (joblib
+    compression) behave the same.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".tmp-{secrets.token_hex(6)}-{path.name}")
+    try:
+        yield tmp
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+
+
 def write_report(report: dict[str, Any], out_dir: str | os.PathLike[str],
                  predictions: pd.DataFrame | None = None) -> dict[str, Path]:
     """Write report.json, report.md and (if given) predictions.parquet into out_dir."""
     out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
     paths = {"json": out / "report.json", "md": out / "report.md"}
-    with open(paths["json"], "w", encoding="utf-8") as fh:
-        json.dump(_json_safe(report), fh, indent=2, allow_nan=False)
-        fh.write("\n")
-    paths["md"].write_text(render_report_md(report), encoding="utf-8")
     if predictions is not None:
         paths["predictions"] = out / "predictions.parquet"
-        predictions.to_parquet(paths["predictions"], index=False)
+        with atomic_path(paths["predictions"]) as tmp:
+            predictions.to_parquet(tmp, index=False)
+    text = json.dumps(_json_safe(report), indent=2, allow_nan=False) + "\n"
+    with atomic_path(paths["json"]) as tmp:
+        tmp.write_text(text, encoding="utf-8")
+    with atomic_path(paths["md"]) as tmp:
+        tmp.write_text(render_report_md(report), encoding="utf-8")
     return paths
 
 
@@ -341,11 +381,17 @@ def _pct(value: Any) -> str:
     return f"{100 * value:.1f}%"
 
 
+def _cell(value: Any) -> str:
+    """A table cell: no line breaks, `|` escaped, and no raw HTML (group names come from data)."""
+    text = " ".join(str(value).split())
+    return text.replace("|", "\\|").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _table(header: Sequence[str], rows: Iterable[Sequence[Any]]) -> list[str]:
     lines = ["| " + " | ".join(header) + " |",
              "|" + "|".join("---" if i == 0 else "---:" for i in range(len(header))) + "|"]
     for row in rows:
-        lines.append("| " + " | ".join(str(c).replace("|", "\\|") for c in row) + " |")
+        lines.append("| " + " | ".join(_cell(c) for c in row) + " |")
     return lines
 
 
@@ -440,10 +486,16 @@ def compare_reports(paths: Sequence[str | os.PathLike[str]]) -> str:
     reports = []
     for path in paths:
         with open(path, encoding="utf-8") as fh:
-            reports.append((Path(path), json.load(fh)))
+            data = json.load(fh)
+        if not (isinstance(data, dict) and isinstance(data.get("model"), dict)
+                and isinstance(data.get("results"), dict)):
+            raise ValueError(f"{path} is not a report.json written by evaluate.py or stack.py")
+        for key in ("corpus", "splits", "train"):
+            data[key] = data.get(key) or {}
+        reports.append((Path(path), data))
     if not reports:
         return "No reports to compare.\n"
-    names = [r["model"]["name"] for _, r in reports]
+    names = [str(r["model"].get("name") or path.parent.name) for path, r in reports]
     labels = [f"{name} ({path.parent.name})" if names.count(name) > 1 else name
               for name, (path, _) in zip(names, reports)]
 

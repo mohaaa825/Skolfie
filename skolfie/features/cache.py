@@ -14,13 +14,26 @@ One cache file holds one feature set:
 
 `name` should change whenever the features change (the callers put a
 version number and the model/truncation settings in it). A file whose
-columns do not match the expected feature names is ignored and rebuilt.
+columns do not match the expected feature names, or that cannot be read
+(e.g. a truncated Drive sync), is ignored and rebuilt.
+
+Each flush writes the whole file to a uniquely named temporary file and
+renames it into place, so a crash never leaves a half-written cache (at
+most a stray .tmp-* file) and two processes sharing a cache directory never
+write the same temporary file.
+They can still overwrite each other's additions (the last writer wins);
+lost rows are simply recomputed later. If the directory is not writable
+(e.g. a saved model whose training cache_dir does not exist on this
+machine), the cache logs a warning and keeps working in memory. The file
+grows with every new text and is never pruned: delete it to reset.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
+import secrets
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -28,7 +41,9 @@ import numpy as np
 
 
 def text_key(text: str) -> str:
-    return hashlib.blake2b(text.encode("utf-8"), digest_size=16).hexdigest()
+    # surrogatepass: a lone surrogate (invalid UTF-8) must not crash the cache;
+    # every valid string hashes exactly as with plain UTF-8.
+    return hashlib.blake2b(text.encode("utf-8", "surrogatepass"), digest_size=16).hexdigest()
 
 
 class FeatureCache:
@@ -51,18 +66,29 @@ class FeatureCache:
     def _load(self) -> None:
         if self.path is None or not self.path.is_file():
             return
+        import pyarrow as pa
         import pyarrow.parquet as pq
 
-        table = pq.read_table(self.path)
+        try:
+            table = pq.read_table(self.path)
+        except (OSError, pa.ArrowException) as exc:
+            self.log(f"[cache] {self.path}: unreadable ({type(exc).__name__}), rebuilding it")
+            return
         if table.column_names != ["key", *self.feature_names]:
             self.log(f"[cache] {self.path}: feature columns changed, ignoring the old file")
             return
         keys = table.column("key").to_pylist()
         values = np.column_stack([table.column(c).to_numpy(zero_copy_only=False)
                                   for c in self.feature_names]).astype(np.float32)
-        self._index = {k: i for i, k in enumerate(keys)}
+        # Keep the first row per key, so row positions and the index agree.
+        first = {}
+        for i, k in enumerate(keys):
+            first.setdefault(k, i)
+        if len(first) != len(keys):
+            values = values[list(first.values())]
+        self._index = {k: i for i, k in enumerate(first)}
         self._rows = [values]
-        self.log(f"[cache] {self.name}: {len(keys):,} cached rows from {self.path}")
+        self.log(f"[cache] {self.name}: {len(first):,} cached rows from {self.path}")
 
     def _matrix(self) -> np.ndarray:
         if len(self._rows) != 1:
@@ -80,10 +106,17 @@ class FeatureCache:
         keys = sorted(self._index, key=self._index.__getitem__)
         columns = {"key": pa.array(keys, type=pa.string())}
         columns.update({name: pa.array(matrix[:, j]) for j, name in enumerate(self.feature_names)})
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".parquet.tmp")
-        pq.write_table(pa.table(columns), tmp)
-        os.replace(tmp, self.path)
+        tmp = self.path.with_name(f".tmp-{secrets.token_hex(6)}-{self.path.name}")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            pq.write_table(pa.table(columns), tmp)
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            self.log(f"[cache] cannot write {self.path} ({exc}); caching in memory only")
+            self.path = None
+        finally:
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
         self._dirty = False
 
     def compute(self, texts: Sequence[str],

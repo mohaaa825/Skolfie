@@ -12,13 +12,15 @@ render_markdown  the review sheet: a checklist table to fill in by hand
                  (are the reasons and the highlighted chunks plausible?),
                  then the details of every case, with each chunk's text.
 
-All user text is escaped (`html.escape` for HTML; table-breaking
-characters for Markdown).
+All text that is not a number is escaped (`html.escape` for HTML;
+`md_escape` for Markdown: table-breaking characters, raw HTML and link /
+image syntax), so a page made from corpus or user text is safe to open.
 """
 
 from __future__ import annotations
 
 import html
+import math
 from typing import Any, Optional, Sequence
 
 from skolfie.explain.reasons import lookup
@@ -58,8 +60,17 @@ def _fmt(x: Any, digits: int = 3) -> str:
     return str(x)
 
 
-def _tint(p: float, threshold: float = 0.5) -> str:
+def _num(x: Any, spec: str) -> str:
+    """A score formatted with `spec`; "n/a" for None / NaN (JSON-safe explanations hold None)."""
+    if x is None or not math.isfinite(float(x)):
+        return "n/a"
+    return format(float(x), spec)
+
+
+def _tint(p: Optional[float], threshold: float = 0.5) -> str:
     """Background colour for a chunk: red above the threshold, blue below, by confidence."""
+    if p is None or not math.isfinite(float(p)):
+        return "rgba(127, 127, 127, 0.15)"
     rgb = _AI_RGB if p >= threshold else _HUMAN_RGB
     strength = min(1.0, abs(p - threshold) / max(threshold, 1 - threshold))
     return f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, {0.08 + 0.42 * strength:.2f})"
@@ -72,7 +83,7 @@ def _heatmap_html(text: str, chunks: Sequence[dict]) -> str:
         if e <= s:
             continue
         parts.append(html.escape(text[pos:s]))
-        tip = f"P(ai) {c['p']:.2f} ({'AI' if c['label'] == 'ai' else 'human'})"
+        tip = f"P(ai) {_num(c['p'], '.2f')} ({'AI' if c['label'] == 'ai' else 'human'})"
         parts.append(f'<span class="chunk" style="background: {_tint(c["p"])}" '
                      f'title="{html.escape(tip)}">{html.escape(text[s:e])}</span>')
         pos = e
@@ -93,13 +104,13 @@ def _features_html(rows: Sequence[dict]) -> str:
         typical = (f"{_fmt(r.get('typical_human'))} / {_fmt(r.get('typical_ai'))}"
                    if r.get("typical_human") is not None or r.get("typical_ai") is not None
                    else "n/a")
-        direction = r["direction"]
+        direction = "ai" if r["direction"] == "ai" else "human"
         out.append(
             f"<tr><td>{k}</td><td>{html.escape(lookup(r['feature']).title)}<br>"
             f'<code class="note">{html.escape(r["feature"])}</code></td>'
             f'<td class="num">{html.escape(_fmt(r["value"]))}</td>'
             f'<td class="num">{html.escape(typical)}</td>'
-            f'<td class="num">{r["contribution"]:+.3f}</td>'
+            f'<td class="num">{_num(r["contribution"], "+.3f")}</td>'
             f'<td class="{direction}">{"AI" if direction == "ai" else "human"}</td>'
             f"<td>{html.escape(r['reason'])}</td></tr>")
     out.append("</tbody></table></div>")
@@ -131,7 +142,7 @@ def render_html(explanations: Sequence[dict], texts: Sequence[str],
         body.append(
             '<section class="case">'
             f"<h2>{html.escape(caption)}</h2>"
-            f'<div class="meta">{_badge(ex["label"])} P(ai) {ex["p_ai"]:.3f}{verdict_note}'
+            f'<div class="meta">{_badge(ex["label"])} P(ai) {_num(ex["p_ai"], ".3f")}{verdict_note}'
             f" &middot; feature model P(ai) {_fmt(fm.get('p_ai'))}"
             f" &middot; {len(ex.get('chunks') or [])} chunk(s)</div>"
             f'<div class="text">{_heatmap_html(text, ex.get("chunks") or [])}</div>'
@@ -146,16 +157,20 @@ def render_html(explanations: Sequence[dict], texts: Sequence[str],
 # --------------------------------------------------------------------------- #
 # Markdown review sheet
 # --------------------------------------------------------------------------- #
+_MD_SPECIAL = str.maketrans({c: "\\" + c for c in "\\|`[]"})
+
+
 def md_escape(text: Any) -> str:
-    """Make text safe inside a Markdown table cell (one line, no HTML, no cell breaks)."""
-    s = str(text).replace("\\", "\\\\").replace("|", "\\|")
+    """Make text safe inside a Markdown table cell: one line, no HTML, no cell breaks, no
+    code spans, links or images."""
+    s = str(text).translate(_MD_SPECIAL)
     s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return " ".join(s.split())
 
 
 def _feature_line(r: dict) -> str:
     arrow = "AI" if r["direction"] == "ai" else "human"
-    return f"`{r['feature']}` → {arrow}: {md_escape(r['reason'])}"
+    return f"{md_escape(r['feature'])} → {arrow}: {md_escape(r['reason'])}"
 
 
 def render_markdown(explanations: Sequence[dict], texts: Sequence[str],
@@ -171,7 +186,7 @@ def render_markdown(explanations: Sequence[dict], texts: Sequence[str],
     if len(cases) != len(texts):
         raise ValueError("cases and texts must have the same length")
     lines = [
-        f"# {title}",
+        f"# {md_escape(title)}",
         "",
         "For each case, read the text (`review.html` shows the chunk heatmap) and fill in the "
         "last two columns with y or n:",
@@ -189,7 +204,7 @@ def render_markdown(explanations: Sequence[dict], texts: Sequence[str],
                             for k, r in enumerate(ex.get("top_features") or [], 1))
         lines.append(f"| {i} | {md_escape(case.get('id', '?'))} | "
                      f"{md_escape(case.get('true_label', '?'))} | {md_escape(ex['label'])} | "
-                     f"{ex['p_ai']:.3f} | {feats} |  |  |")
+                     f"{_num(ex['p_ai'], '.3f')} | {feats} |  |  |")
 
     lines += ["", "## Cases", ""]
     for i, (ex, text, case) in enumerate(zip(explanations, texts, cases), 1):
@@ -198,7 +213,7 @@ def render_markdown(explanations: Sequence[dict], texts: Sequence[str],
             f"### {i}. {md_escape(case.get('id', f'text {i}'))}",
             "",
             f"True label **{md_escape(case.get('true_label', '?'))}**, verdict "
-            f"**{md_escape(ex['label'])}** (P(ai) {ex['p_ai']:.3f}"
+            f"**{md_escape(ex['label'])}** (P(ai) {_num(ex['p_ai'], '.3f')}"
             + (f", without the chunk rule: {md_escape(ex['verdict'])}"
                if ex.get("verdict") and ex["verdict"] != ex["label"] else "")
             + f"); feature model P(ai) {_fmt(fm.get('p_ai'))}.",
@@ -208,13 +223,15 @@ def render_markdown(explanations: Sequence[dict], texts: Sequence[str],
         ]
         for k, r in enumerate(ex.get("top_features") or [], 1):
             lines.append(
-                f"| {k} | `{r['feature']}` | {_fmt(r['value'])} | "
+                f"| {k} | {md_escape(r['feature'])} | {_fmt(r['value'])} | "
                 f"{_fmt(r.get('typical_human'))} / {_fmt(r.get('typical_ai'))} | "
-                f"{r['contribution']:+.3f} | {'AI' if r['direction'] == 'ai' else 'human'} | "
+                f"{_num(r['contribution'], '+.3f')} | "
+                f"{'AI' if r['direction'] == 'ai' else 'human'} | "
                 f"{md_escape(r['reason'])} |")
         lines += ["", "| chunk | P(ai) | scored | text |", "|---:|---:|---|---|"]
         for k, c in enumerate(ex.get("chunks") or [], 1):
-            lines.append(f"| {k} | {c['p']:.3f} | {'**AI**' if c['label'] == 'ai' else 'human'}"
+            scored = "**AI**" if c["label"] == "ai" else "human"
+            lines.append(f"| {k} | {_num(c['p'], '.3f')} | {scored}"
                          f" | {md_escape(text[c['start']:c['end']])} |")
         lines.append("")
     return "\n".join(lines) + "\n"

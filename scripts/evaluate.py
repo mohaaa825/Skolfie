@@ -50,7 +50,7 @@ from typing import Any, Optional, Sequence
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODEL_CHOICES = (
     "length | tfidf | features | features-nolm | features-rf | features-nolm-rf | ensemble | "
-    "transformer | transformer-text | ensemble:PATH | joblib:PATH"
+    "transformer | transformer-text | transformer-chunks | ensemble:PATH | joblib:PATH"
 )
 NAMED_MODELS = ("features", "features-nolm", "features-rf", "features-nolm-rf",
                   "transformer", "transformer-text", "transformer-chunks")
@@ -184,7 +184,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         missing = [p for p in paths if not Path(p).is_file()]
         if missing or not paths:
             parser.error(f"report file(s) not found: {', '.join(missing) or args.compare}")
-        print(compare_reports(paths), end="")
+        try:
+            print(compare_reports(paths), end="")
+        except ValueError as exc:  # also malformed JSON
+            parser.error(str(exc))
         return 0
 
     for flag in ("corpus", "splits", "model"):
@@ -204,6 +207,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"[note] ensemble is slow: --max-eval defaults to {args.max_eval}")
 
     from skolfie.eval.report import (
+        atomic_path,
         load_corpus,
         load_splits,
         load_splits_manifest,
@@ -242,8 +246,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.save_model:
         import joblib
 
-        args.save_model.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(scorer, args.save_model)
+        with atomic_path(args.save_model) as tmp:
+            joblib.dump(scorer, tmp)
         paths["model"] = args.save_model
     print()
     print(paths["md"].read_text(encoding="utf-8"), end="")

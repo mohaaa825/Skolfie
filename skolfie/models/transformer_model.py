@@ -80,6 +80,7 @@ import numpy as np
 
 from skolfie.eval.metrics import to_binary
 from skolfie.models.feature_model import FeatureModel
+from skolfie.models.feature_model import as_text as _as_text
 
 FEATURE_HIDDEN = 64
 DROPOUT = 0.1
@@ -155,14 +156,6 @@ def _lr_factor(step: int, warmup: int, total: int) -> float:
     if step < warmup:
         return (step + 1) / (warmup + 1)
     return max(0.0, (total - step) / max(1, total - warmup))
-
-
-def _as_text(t: Any) -> str:
-    if isinstance(t, str):
-        return t
-    if t is None or (isinstance(t, float) and math.isnan(t)):
-        return ""
-    return str(t)
 
 
 def _sigmoid(z: np.ndarray) -> np.ndarray:
@@ -319,6 +312,8 @@ class TransformerModel:
         with tempfile.TemporaryDirectory() as tmp:
             for name, data in packed["tokenizer_files"].items():
                 path = Path(tmp) / name
+                if ".." in Path(name).parts or Path(name).is_absolute():
+                    raise ValueError(f"bad tokenizer file name in the saved model: {name!r}")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
             tokenizer = AutoTokenizer.from_pretrained(tmp, use_fast=True)

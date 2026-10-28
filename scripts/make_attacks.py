@@ -176,6 +176,8 @@ def stratified_take(df: Any, n: int, seed: int) -> Any:
 
     if len(df) <= n:
         return df
+    if n <= 0:
+        return df.iloc[:0]
     sizes = df.groupby(["source", "domain"], sort=True).size()
     quotas = sizes / sizes.sum() * n
     take = np.floor(quotas).astype(int)
@@ -273,6 +275,21 @@ def _signature(**parts: Any) -> str:
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
+def _read_signature(path: Path) -> str | None:
+    """The signature saved next to a part file, or None if missing or unreadable."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))["signature"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _replace_atomically(path: Path, write: Any) -> None:
+    """Call write(tmp_path), then move the finished file into place (never half-written)."""
+    tmp = path.with_name(path.name + ".tmp")
+    write(tmp)
+    os.replace(tmp, path)
+
+
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
@@ -363,6 +380,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         n_ai = round(args.share * len(ai_pool))
         if args.n:
             n_ai = min(n_ai, args.n)
+        if n_ai == 0:
+            parser.error(f"--share {args.share} of {len(ai_pool):,} eligible AI texts is no text")
         rng = np.random.default_rng(args.seed)
         ai_rows = stratified_take(ai_pool, n_ai, args.seed).reset_index(drop=True)
         choice = rng.choice(len(attacks), size=len(ai_rows), p=w / w.sum())
@@ -422,13 +441,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          rows=hashlib.sha256("\x00".join(rows["id"] + "\x01" + rows["text"])
                                              .encode("utf-8")).hexdigest())
         part_path, sig_path = parts_dir / f"{a}.parquet", parts_dir / f"{a}.json"
-        if (not args.force and part_path.is_file() and sig_path.is_file()
-                and json.loads(sig_path.read_text())["signature"] == sig):
+        if not args.force and part_path.is_file() and _read_signature(sig_path) == sig:
             out = pd.read_parquet(part_path)
             print(f"[{a}] reused {len(out):,} rows from {part_path}")
         else:
             print(f"[{a}] attacking {len(rows):,} texts ({spec.description})")
             t0 = time.time()
+            # The old signature goes first: if this run stops before the new one is written,
+            # the part is rebuilt next time instead of being taken for the old one.
+            sig_path.unlink(missing_ok=True)
             new = apply_attack(a, rows, ctx)
             meta = ctx.meta.get(a) or [{} for _ in new]
             keep = [i for i, t in enumerate(new) if t is not None and t.strip()]
@@ -445,8 +466,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "word_change": [word_change(o, t) for o, t in zip(src["text"], texts)],
                 "meta": [json.dumps(meta[i], sort_keys=True) for i in keep],
             }, columns=OUT_COLUMNS)
-            out.to_parquet(part_path, index=False)
-            sig_path.write_text(json.dumps({"signature": sig}) + "\n")
+            _replace_atomically(part_path, lambda tmp: out.to_parquet(tmp, index=False))
+            _replace_atomically(sig_path, lambda tmp: tmp.write_text(
+                json.dumps({"signature": sig}) + "\n", encoding="utf-8"))
             print(f"[{a}] {len(out):,} of {len(rows):,} attacked in {time.time() - t0:.0f}s"
                   + (f"; {len(rows) - len(out):,} failed and dropped" if len(out) < len(rows)
                      else ""))
@@ -470,7 +492,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         clean["n_words"] = clean["text"].str.split().str.len()
         frames.insert(0, clean[OUT_COLUMNS])
     result = pd.concat(frames, ignore_index=True)
-    result.to_parquet(out_dir / "attacks.parquet", index=False)
+    _replace_atomically(out_dir / "attacks.parquet",
+                        lambda tmp: result.to_parquet(tmp, index=False))
 
     from skolfie.eval.report import _json_safe, git_info
 
@@ -487,9 +510,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "attacks": stats, "skipped": skipped, "config": config,
         "git": git_info(), "seconds": round(time.time() - started, 1),
     })
-    with open(out_dir / "attacks_manifest.json", "w", encoding="utf-8") as fh:
-        json.dump(info, fh, indent=2, allow_nan=False)
-        fh.write("\n")
+    _replace_atomically(out_dir / "attacks_manifest.json", lambda tmp: tmp.write_text(
+        json.dumps(info, indent=2, allow_nan=False) + "\n", encoding="utf-8"))
     print()
     print(f"{'attack':16s} {'ai':>6s} {'human':>6s} {'failed':>6s} {'changed':>8s}")
     for a, s in stats.items():

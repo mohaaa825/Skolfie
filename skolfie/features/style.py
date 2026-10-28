@@ -351,8 +351,8 @@ def _sent_start_diversity(firsts: list[str]) -> float:
 # --------------------------------------------------------------------------
 def style_features(text: str) -> np.ndarray:
     """Return the style feature vector (float64, ordered like STYLE_FEATURES)."""
-    if not isinstance(text, str):
-        text = "" if text is None else str(text)
+    if not isinstance(text, str):  # None / NaN (missing values) count as empty
+        text = "" if text is None or (isinstance(text, float) and text != text) else str(text)
     f = dict.fromkeys(STYLE_FEATURES, 0.0)
 
     # ---- characters --------------------------------------------------------

@@ -139,6 +139,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from skolfie.eval.metrics import to_binary
     from skolfie.eval.report import (
         EVAL_SPLITS,
+        atomic_path,
         load_corpus,
         load_splits,
         load_splits_manifest,
@@ -208,8 +209,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         model = StackedModel({n: model_paths[n] for n in names}, stacker, cutoffs, info)
         import joblib
 
-        args.save_model.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(model, args.save_model)
+        with atomic_path(args.save_model) as tmp:
+            joblib.dump(model, tmp)
         paths["model"] = args.save_model
 
     print()

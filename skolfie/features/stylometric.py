@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 import string
 from collections import Counter
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -57,8 +57,8 @@ def download_nltk_data() -> None:
 
 _NLTK_READY = False
 try:
-    from nltk.tokenize import word_tokenize, sent_tokenize
     from nltk import pos_tag
+    from nltk.tokenize import sent_tokenize, word_tokenize
 
     word_tokenize("Smoke test.")  # confirm data actually loaded
     _NLTK_READY = True
@@ -90,9 +90,13 @@ def _simple_sent_tokenize(text: str) -> List[str]:
     return [s for s in sentences if s.strip()]
 
 
+# Runs of letters (any script, not digits/underscore) and apostrophes.
+_FALLBACK_WORD_RE = re.compile(r"(?:[^\W\d_]|')+")
+
+
 def _simple_word_tokenize(text: str) -> List[str]:
     """Regex fallback word tokenizer (used only if NLTK data is missing)."""
-    return re.findall(r"[A-Za-z']+", text)
+    return _FALLBACK_WORD_RE.findall(text)
 
 
 def tokenize_sentences(text: str) -> List[str]:
@@ -140,15 +144,13 @@ def _yules_k(word_counts: Counter, n_words: int) -> float:
     freq_of_freq = Counter(word_counts.values())
     m1 = n_words
     m2 = sum((freq ** 2) * count for freq, count in freq_of_freq.items())
-    if m1 == 0:
-        return 0.0
     return 10000.0 * (m2 - m1) / (m1 * m1)
 
 
 class FeatureExtractor:
     """Extracts a dictionary of stylometric features from raw text."""
 
-    def __init__(self, function_words: List[str] = None):
+    def __init__(self, function_words: Optional[List[str]] = None):
         self.function_words = function_words or FUNCTION_WORDS
 
     # ---------------------------------------------------------------
@@ -177,7 +179,7 @@ class FeatureExtractor:
         # ---- 2. Sentence structure --------------------------------------
         sent_lengths = [len(tokenize_words(s)) for s in sentences] or [0]
         features["sentence_length_std"] = float(np.std(sent_lengths))
-        mean_sl = float(np.mean(sent_lengths)) if sent_lengths else 0.0
+        mean_sl = float(np.mean(sent_lengths))
         features["sentence_length_burstiness"] = (
             features["sentence_length_std"] / mean_sl if mean_sl else 0.0
         )

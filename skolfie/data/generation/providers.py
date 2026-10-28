@@ -7,8 +7,9 @@ AI-written text.
 Every provider satisfies the `Provider` protocol: a `model_name` attribute
 and `generate(prompt, *, temperature, max_tokens) -> str`. The HTTP
 providers call the vendors' REST APIs directly with `requests` (no vendor
-SDKs), retry 408/429/5xx responses and connection errors with exponential
-backoff, and keep request/token counts in `provider.stats`.
+SDKs), retry 408/409/429/5xx responses and connection errors with exponential
+backoff, and keep request/token counts in `provider.stats`. The API key is
+sent only in a request header and is masked in every error message.
 
     provider          env vars                                      default model
     anthropic         ANTHROPIC_API_KEY (ANTHROPIC_BASE_URL)         claude-opus-5-5
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import random
 import re
@@ -35,6 +37,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
+from urllib.parse import urlsplit
+
+log = logging.getLogger(__name__)
 
 ANTHROPIC_VERSION = "2023-06-01"
 
@@ -105,10 +110,33 @@ def _http_post(url: str, headers: Mapping[str, str], payload: dict, timeout: flo
 
     try:
         resp = requests.post(url, headers=dict(headers), json=payload, timeout=timeout)
-    except (requests.ConnectionError, requests.Timeout) as exc:
+    except (requests.ConnectionError, requests.Timeout,
+            requests.exceptions.ChunkedEncodingError) as exc:  # last: cut off mid-body
         raise TransientHTTPError(f"{type(exc).__name__}: {exc}") from exc
     return HTTPResponse(resp.status_code, {k.lower(): v for k, v in resp.headers.items()},
                         resp.text)
+
+
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+
+
+def check_base_url(base_url: str, has_key: bool) -> None:
+    """ProviderConfigError unless `base_url` is an http(s) URL; warn when an API key
+    would be sent unencrypted (plain http) to a host other than this machine."""
+    parts = urlsplit(base_url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ProviderConfigError(
+            f"base URL must start with http:// or https:// and name a host, got {base_url!r}"
+        )
+    if parts.scheme == "http" and has_key and parts.hostname not in _LOCAL_HOSTS:
+        log.warning("sending the API key over plain http to %s; use https for remote servers",
+                    parts.hostname)
+
+
+def redact(text: str, secret: str | None) -> str:
+    """`text` with every occurrence of `secret` masked (secrets under 8 characters are
+    not real keys, and masking them would mangle the text)."""
+    return text.replace(secret, "***") if secret and len(secret) >= 8 else text
 
 
 def is_retryable(status: int) -> bool:
@@ -181,6 +209,11 @@ class HTTPProvider:
         backoff_max: float = 60.0,
         send_temperature: bool | None = None,
     ) -> None:
+        if not timeout or timeout <= 0:
+            raise ProviderConfigError(f"timeout must be > 0 seconds, got {timeout!r}")
+        if max_retries < 0:
+            raise ProviderConfigError(f"max_retries must be >= 0, got {max_retries!r}")
+        check_base_url(base_url, bool(api_key))
         self.model_name = model
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -238,14 +271,15 @@ class HTTPProvider:
             try:
                 resp = _http_post(url, headers, payload, self.timeout)
             except TransientHTTPError as exc:
-                error = ProviderError(f"{self.provider_name}: {exc}")
+                error = ProviderError(redact(f"{self.provider_name}: {exc}", self.api_key))
             else:
+                body = redact(resp.text, self.api_key)
                 if 200 <= resp.status < 300:
-                    return resp.json()
+                    return self._parse(resp.status, body)
                 error = ProviderError(
-                    f"{self.provider_name} API returned HTTP {resp.status}: {resp.text[:300]}",
+                    f"{self.provider_name} API returned HTTP {resp.status}: {body[:300]}",
                     status=resp.status,
-                    body=resp.text,
+                    body=body,
                 )
                 if not is_retryable(resp.status):
                     self.stats.add(failures=1)
@@ -258,6 +292,22 @@ class HTTPProvider:
         self.stats.add(failures=1)
         assert error is not None
         raise error
+
+    def _parse(self, status: int, body: str) -> dict:
+        """The JSON object of a 2xx reply; ProviderError (not retried) if it is not one."""
+        try:
+            data = json.loads(body) if body else {}
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            self.stats.add(failures=1)
+            raise ProviderError(
+                f"{self.provider_name} API returned HTTP {status} without a JSON object: "
+                f"{body[:300]}",
+                status=status,
+                body=body,
+            )
+        return data
 
 
 def _anthropic_version_tuple(model: str) -> tuple[int, int] | None:

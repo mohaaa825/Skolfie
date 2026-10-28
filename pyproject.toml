@@ -40,11 +40,6 @@ select = ["E", "F", "I"]
 [tool.ruff.lint.per-file-ignores]
 # Fixture data: one long string literal per example text.
 "tests/fixtures/seed_texts.py" = ["E501"]
-# Pre-existing code carried over from the flat layout; remove these entries
-# once the files are cleaned up.
-"skolfie/data/feedback.py" = ["I001"]
-"skolfie/features/stylometric.py" = ["I001"]
-"skolfie/models/ensemble.py" = ["I001", "E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

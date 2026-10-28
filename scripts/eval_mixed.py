@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -201,6 +202,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if not args.model.is_file():
         parser.error(f"model file not found: {args.model}")
+    if args.fit_split == args.eval_split:
+        print(f"[warn] --fit-split and --eval-split are both {args.eval_split!r}: the rules are "
+              "tuned on the split they are scored on, so the eval numbers are optimistic",
+              file=sys.stderr)
     corpus = load_corpus(args.corpus)
     splits = load_splits(args.splits)
     manifest = load_splits_manifest(args.splits)
@@ -269,9 +274,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     })
     out_dir = args.out_dir or Path("reports") / f"mixed-{args.model.stem}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / "mixed_report.json", "w", encoding="utf-8") as fh:
-        json.dump(report, fh, indent=2, allow_nan=False)
-        fh.write("\n")
+    # explain.py reads the tuned rule from this file: replace it whole, never half-written.
+    tmp = out_dir / "mixed_report.json.tmp"
+    tmp.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    os.replace(tmp, out_dir / "mixed_report.json")
     md = render_md(report)
     (out_dir / "mixed_report.md").write_text(md, encoding="utf-8")
     pd.DataFrame({
