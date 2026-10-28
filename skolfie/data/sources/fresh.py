@@ -52,7 +52,7 @@ REQUIRED = ("id", "text", "label", "generator", "domain", "subdomain")
 
 def _iter_lines(path: Path) -> Iterator[tuple[int, dict]]:
     """Yield (line number, row), skipping blank, truncated or non-object lines."""
-    with open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8-sig") as fh:
         for lineno, line in enumerate(fh, start=1):
             if not line.strip():
                 continue

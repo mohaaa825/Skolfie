@@ -24,6 +24,11 @@ StackedModel
     The scorer used after training: loads the member models (joblib files,
     lazily), stacks their scores and applies the cut-offs. `predict_proba()`
     follows the common scorer contract; `predict()` returns the verdicts.
+    The member paths are stored as given to `stack.py --model-path` (on
+    Colab, absolute Drive paths); on another machine, copy the member files
+    there or point `model.members[name]` at their new location. Loading a
+    member unpickles it, so the same trust rule as for `JoblibScorer`
+    applies: a StackedModel is only as trustworthy as the files it names.
 """
 
 from __future__ import annotations
@@ -206,7 +211,13 @@ class StackedModel:
         if name not in self._loaded:
             from skolfie.models.baselines import JoblibScorer
 
-            self._loaded[name] = JoblibScorer(self.members[name])
+            path = self.members[name]
+            if not os.path.isfile(path):
+                raise FileNotFoundError(
+                    f"StackedModel member {name!r}: model file not found: {path} (paths are "
+                    f"recorded by stack.py --model-path; copy the file there or set "
+                    f"model.members[{name!r}] to its new path)")
+            self._loaded[name] = JoblibScorer(path)
         return self._loaded[name]
 
     def params(self) -> dict[str, Any]:

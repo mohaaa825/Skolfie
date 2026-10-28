@@ -442,6 +442,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("--n must be >= 1")
     if args.concurrency < 1:
         parser.error("--concurrency must be >= 1")
+    if not args.timeout > 0:
+        parser.error("--timeout must be > 0")
+    if args.max_retries < 0:
+        parser.error("--max-retries must be >= 0")
 
     try:
         model = resolve_model(args.provider, args.model)

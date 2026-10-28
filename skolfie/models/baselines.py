@@ -310,8 +310,13 @@ class JoblibScorer:
     The object may return P(ai) with shape (n,), or an (n, 2) sklearn-style
     array (the "ai"/1 column is picked via `classes_` if present, else column
     1). A pickled `AIDetectorModel` is wrapped in `AIDetectorAdapter`. The
-    object is treated as already trained: fit() is a no-op. Only load files
-    you trust; unpickling runs code.
+    object is treated as already trained: fit() is a no-op.
+
+    Trust boundary: unpickling runs arbitrary code, so `path` must be a model
+    file you (or your own training run) wrote, never one derived from user
+    input or downloaded from an untrusted place. The callers only pass paths
+    from the command line, an environment variable or a `StackedModel` that
+    was itself loaded from such a path.
     """
 
     pretrained = True
@@ -398,5 +403,6 @@ def make_scorer(spec: str, seed: int = 0, **options: Any) -> Any:
         return AIDetectorAdapter(model_path=spec.split(":", 1)[1])
     if spec.startswith("joblib:"):
         return JoblibScorer(spec.split(":", 1)[1])
-    raise ValueError(f"unknown model spec {spec!r}; use length, tfidf, features, ensemble "
-                     "or joblib:PATH")
+    raise ValueError(f"unknown model spec {spec!r}; use length, tfidf, ensemble, "
+                     f"{', '.join([*FEATURE_SPECS, *TRANSFORMER_SPECS])}, ensemble:PATH or "
+                     "joblib:PATH")

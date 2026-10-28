@@ -114,7 +114,7 @@ def get_attack(name: str) -> AttackSpec:
     """The spec of an attack name, e.g. "typo_10", "homoglyph" or "t5_paraphrase"."""
     if name in _FIXED:
         return _FIXED[name]
-    m = _RATED.match(name)
+    m = _RATED.fullmatch(name)
     if not m:
         raise ValueError(f"unknown attack {name!r}; known: {', '.join(ATTACKS)} "
                          "(rates are percentages, e.g. typo_10)")
@@ -581,7 +581,14 @@ def clean_llm_output(raw: str | None, min_words: int = MIN_LLM_WORDS) -> str | N
         return None
     text = _THINK.sub("", raw).replace("\r\n", "\n").strip()
     text = _PREAMBLE.sub("", text, count=1).strip()
-    text = text.strip('"').strip()
+    # Drop quotes wrapped around the whole reply (the prompt fences the text in """), but
+    # not the quotes of a text that starts and ends with a quotation.
+    for fence in ('"""', "```", '"'):
+        inner = text[len(fence):-len(fence)]
+        if (len(text) > 2 * len(fence) and text.startswith(fence) and text.endswith(fence)
+                and '"' not in inner):
+            text = inner.strip()
+            break
     if not text or _REFUSAL.match(text) or len(text.split()) < min_words:
         return None
     return text
@@ -644,6 +651,9 @@ def run_prompts(provider: Any, prompts: Sequence[str], *, temperature: float,
     """
     from skolfie.data.generation.providers import FATAL_STATUSES, ProviderError
 
+    key = getattr(provider, "api_key", None)
+    key = key if isinstance(key, str) and key else None
+
     def call(i: int) -> str | None:
         try:
             raw = provider.generate(prompts[i], temperature=temperature,
@@ -651,7 +661,8 @@ def run_prompts(provider: Any, prompts: Sequence[str], *, temperature: float,
         except ProviderError as exc:
             if exc.status in FATAL_STATUSES:
                 raise
-            log(f"[llm] request {i} failed: {exc}")
+            msg = str(exc)  # the API's error body, which could echo the key
+            log(f"[llm] request {i} failed: {msg.replace(key, '***') if key else msg}")
             return None
         return raw
 

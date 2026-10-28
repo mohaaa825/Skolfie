@@ -15,22 +15,39 @@ Final probability = weighted blend of the Burrows' Delta signal and the
 ML ensemble's soft-voted probability. This mirrors how a human stylometry
 expert would work: use robust distributional statistics (Delta) as a
 sanity check alongside a more flexible learned model.
+
+The Delta scores are also features of the ML ensemble. For the training rows
+they are computed out-of-fold (each row scored by a Delta model fitted on
+the other folds); scoring a row with a Delta model fitted on that same row
+leaks its label, so the ML members learned to over-trust the Delta columns.
+
+Saved models are joblib pickles: `load()` runs code from the file, so only
+load models you trained yourself, from a path you control.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List
+import contextlib
+import os
+import uuid
+from typing import Dict, List, Optional, Sequence
 
-import numpy as np
 import joblib
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.feature_extraction.text import TfidfVectorizer
 
-from skolfie.features.stylometric import FeatureExtractor, tokenize_words, FUNCTION_WORDS, features_to_vector
 from skolfie.features.burrows_delta import BurrowsDeltaModel
+from skolfie.features.stylometric import (
+    FUNCTION_WORDS,
+    FeatureExtractor,
+    features_to_vector,
+    tokenize_words,
+)
 
 # Weight given to the Burrows' Delta signal vs. the ML ensemble signal when
 # blending the final probability. The ML ensemble generally becomes more
@@ -38,6 +55,11 @@ from skolfie.features.burrows_delta import BurrowsDeltaModel
 # robust with very little data -- hence a meaningful but minority weight.
 BURROWS_WEIGHT = 0.35
 ML_WEIGHT = 1.0 - BURROWS_WEIGHT
+
+# Burrows' Delta settings, and folds for its out-of-fold training features.
+BURROWS_N_WORDS = 60
+OOF_FOLDS = 5
+_NEUTRAL_BURROWS_ROW = (0.0, 0.0, 0.5)
 
 # Friendly display names for the more cryptic internal feature keys.
 _FRIENDLY_NAMES = {
@@ -79,16 +101,56 @@ class AIDetectorModel:
             analyzer="char_wb", ngram_range=(2, 4), max_features=150, sublinear_tf=True
         )
         self.scaler = StandardScaler()
-        self.ensemble: VotingClassifier = None
+        self.ensemble: Optional[VotingClassifier] = None
         self.feature_names: List[str] = []
         self.is_trained = False
 
     # -----------------------------------------------------------------
     # Feature matrix construction
     # -----------------------------------------------------------------
-    def _build_feature_matrix(self, texts: List[str], fit: bool = False) -> np.ndarray:
+    @staticmethod
+    def _burrows_row(burrows_model: BurrowsDeltaModel, tokens: Sequence[str]) -> List[float]:
+        s = burrows_model.score(tokens)  # neutral when the model is not fitted
+        return [s["delta_human"], s["delta_ai"], s["ai_probability"]]
+
+    @classmethod
+    def _oof_burrows_rows(cls, tokens_list: Sequence[Sequence[str]], labels: Sequence[str],
+                          random_state: int = 42) -> np.ndarray:
+        """
+        Burrows' Delta features for training rows, each scored by a Delta
+        model fitted on the other folds. Rows stay neutral when a class has
+        fewer than two examples or a fold cannot be fitted.
+        """
+        labels_arr = np.asarray([str(lab) for lab in labels])
+        rows = np.tile(np.asarray(_NEUTRAL_BURROWS_ROW, dtype=float), (len(labels_arr), 1))
+        _, counts = np.unique(labels_arr, return_counts=True)
+        n_splits = min(OOF_FOLDS, int(counts.min()))
+        if len(counts) < 2 or n_splits < 2:
+            return rows
+        folds = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+        for fit_idx, held_idx in folds.split(np.zeros(len(labels_arr)), labels_arr):
+            fold_model = BurrowsDeltaModel()
+            try:
+                fold_model.fit([tokens_list[i] for i in fit_idx], labels_arr[fit_idx],
+                               n_words=BURROWS_N_WORDS, candidate_vocab=FUNCTION_WORDS)
+            except ValueError:  # no usable vocabulary / class in this fold
+                continue
+            for i in held_idx:
+                rows[i] = cls._burrows_row(fold_model, tokens_list[i])
+        return rows
+
+    def _build_feature_matrix(self, texts: List[str], fit: bool = False,
+                              stylo_dicts: Optional[List[Dict[str, float]]] = None,
+                              burrows_rows: Optional[Sequence[Sequence[float]]] = None
+                              ) -> np.ndarray:
+        """
+        Stylometric + Burrows' Delta + char n-gram TF-IDF matrix. Precomputed
+        `stylo_dicts` / `burrows_rows` (one per text) are used when given;
+        otherwise they are computed here, Delta with the fitted full model.
+        """
         # 1. Stylometric feature dicts -> fixed-order numeric matrix
-        stylo_dicts = [self.feature_extractor.extract_features(t) for t in texts]
+        if stylo_dicts is None:
+            stylo_dicts = [self.feature_extractor.extract_features(t) for t in texts]
         if fit or not self.feature_names:
             self.feature_names = sorted(stylo_dicts[0].keys())
         stylo_matrix = np.vstack(
@@ -96,15 +158,10 @@ class AIDetectorModel:
         )
 
         # 2. Burrows' Delta signal as three extra numeric features
-        burrows_rows = []
-        for t in texts:
-            tokens = tokenize_words(t)
-            if self.burrows_model.vocabulary:
-                s = self.burrows_model.score(tokens)
-                burrows_rows.append([s["delta_human"], s["delta_ai"], s["ai_probability"]])
-            else:
-                burrows_rows.append([0.0, 0.0, 0.5])
-        burrows_matrix = np.array(burrows_rows)
+        if burrows_rows is None:
+            burrows_rows = [self._burrows_row(self.burrows_model, tokenize_words(t))
+                            for t in texts]
+        burrows_matrix = np.asarray(burrows_rows, dtype=float).reshape(len(texts), 3)
 
         # 3. Character n-gram TF-IDF (captures lower-level stylistic/typo signal)
         if fit:
@@ -142,10 +199,11 @@ class AIDetectorModel:
         """
         tokens_list = [tokenize_words(t) for t in texts]
         self.burrows_model.fit(
-            tokens_list, labels, n_words=60, candidate_vocab=FUNCTION_WORDS
+            tokens_list, labels, n_words=BURROWS_N_WORDS, candidate_vocab=FUNCTION_WORDS
         )
+        oof_rows = self._oof_burrows_rows(tokens_list, labels, random_state=random_state)
 
-        combined = self._build_feature_matrix(texts, fit=True)
+        combined = self._build_feature_matrix(texts, fit=True, burrows_rows=oof_rows)
         scaled = self.scaler.fit_transform(combined)
 
         rf = RandomForestClassifier(
@@ -182,8 +240,13 @@ class AIDetectorModel:
 
         tokens = tokenize_words(text)
         burrows_result = self.burrows_model.score(tokens)
+        raw_features = self.feature_extractor.extract_features(text)
 
-        combined = self._build_feature_matrix([text], fit=False)
+        combined = self._build_feature_matrix(
+            [text], stylo_dicts=[raw_features],
+            burrows_rows=[[burrows_result["delta_human"], burrows_result["delta_ai"],
+                           burrows_result["ai_probability"]]],
+        )
         scaled = self.scaler.transform(combined)
 
         ml_proba = self.ensemble.predict_proba(scaled)[0]
@@ -215,7 +278,7 @@ class AIDetectorModel:
             "burrows_delta_ai": burrows_result["delta_ai"],
             "burrows_top_words": top_words,
             "top_features": top_features,
-            "raw_features": self.feature_extractor.extract_features(text),
+            "raw_features": raw_features,
         }
 
     # -----------------------------------------------------------------
@@ -264,8 +327,18 @@ class AIDetectorModel:
     # Persistence
     # -----------------------------------------------------------------
     def save(self, path: str):
-        joblib.dump(self, path)
+        """Pickle the model to `path` atomically (temp file + rename)."""
+        path = os.fspath(path)
+        tmp = f"{path}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        try:
+            joblib.dump(self, tmp)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+            raise
 
     @staticmethod
     def load(path: str) -> "AIDetectorModel":
+        """Unpickle a saved model. This runs code from the file: trusted paths only."""
         return joblib.load(path)

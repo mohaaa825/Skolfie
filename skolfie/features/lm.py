@@ -123,6 +123,23 @@ def _token_stats(
     return nll, rank, entropy
 
 
+def _clean_text(t: Any, clip: int) -> str:
+    """`t` as a str clipped to `clip` characters; None/NaN -> "".
+
+    Lone surrogates (not encodable as UTF-8) make the Rust tokenizer raise,
+    so they become "?" (one character each, so offsets are unchanged).
+    """
+    if not isinstance(t, str):
+        t = "" if t is None or (isinstance(t, float) and math.isnan(t)) else str(t)
+    t = t[:clip]
+    if not t.isascii():
+        try:
+            t.encode("utf-8")
+        except UnicodeEncodeError:
+            t = t.encode("utf-8", "replace").decode("utf-8")
+    return t
+
+
 def _sentence_ids(text: str, starts: np.ndarray) -> np.ndarray:
     """Map token start offsets (characters) to sentence indices."""
     bounds = [m.end() for m in _SENTENCE_BOUNDARY.finditer(text)]
@@ -264,7 +281,7 @@ class LMFeaturizer:
         sent_out: list[np.ndarray] = []
         chunk = 1024
         for lo in range(0, len(texts), chunk):
-            part = [("" if t is None else str(t))[:clip] for t in texts[lo : lo + chunk]]
+            part = [_clean_text(t, clip) for t in texts[lo : lo + chunk]]
             enc = self.tokenizer(
                 part,
                 add_special_tokens=False,

@@ -17,6 +17,15 @@ SKOLFIE_MODEL environment variable). The app never trains a model itself:
 if the file is missing it says so and points at `python scripts/train.py`.
 Feedback goes to `feedback_data.csv` (override with SKOLFIE_FEEDBACK).
 
+Trust boundary: the model path comes only from the operator (environment),
+never from the UI, because loading a joblib pickle runs code. Uploads and
+pasted text are untrusted: uploads are size- and content-checked by
+`skolfie.data.file_parsers`, texts are capped at MAX_TEXT_CHARS before any
+model runs, and errors shown in the UI carry no paths or tracebacks. The
+app binds to 127.0.0.1 without a share link by default; anyone who can open
+it can read every collected feedback row on the Feedback & Dataset tab, so
+only expose it (--host 0.0.0.0 / --share) to people allowed to see that.
+
 Gradio is imported lazily inside `build_app()` so `skolfie.app` can be
 imported (and its helpers tested) without Gradio installed.
 
@@ -25,7 +34,9 @@ Run with:  python -m skolfie.app
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -33,13 +44,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from skolfie.data import feedback as feedback_store
-from skolfie.data.file_parsers import extract_text_from_file
+from skolfie.data.file_parsers import MAX_FILE_BYTES, FileParseError, extract_text_from_file
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_PATH = Path("models") / "detector_model.joblib"
 DEFAULT_FEEDBACK_PATH = Path("feedback_data.csv")
 
 LABEL_AI = "AI-Generated"
 LABEL_HUMAN = "Human-Written"
+THUMBS = ("up", "down")
+
+# Upper bounds on untrusted input, checked before any model runs.
+MAX_TEXT_CHARS = 100_000
+MAX_COMMENT_CHARS = 2_000
 
 TRAIN_HINT = (
     "Train one first, e.g.\n\n"
@@ -102,6 +120,14 @@ class ModelHolder:
         return self.model is not None
 
 
+_MD_SPECIAL = re.compile(r"([\\`*_{}\[\]()<>#+!|~])")
+
+
+def _md_escape(text: str) -> str:
+    """Backslash-escape Markdown/HTML syntax in text shown in a gr.Markdown."""
+    return _MD_SPECIAL.sub(r"\\\1", text)
+
+
 def resolve_input_text(text: Optional[str], file_path: Optional[str]) -> str:
     """An uploaded file wins over pasted text."""
     if file_path:
@@ -147,12 +173,22 @@ def analyze(holder: ModelHolder, text: Optional[str], file_path: Optional[str]
         return holder.status or holder.load(), {}, [], None
     try:
         content = resolve_input_text(text, file_path)
-    except Exception as exc:
-        return f"**Could not read the file:** {exc}", {}, [], None
+    except FileParseError as exc:
+        return f"**Could not read the file:** {_md_escape(str(exc))}", {}, [], None
+    except Exception:
+        logger.exception("reading the uploaded file failed")
+        return "**Could not read the file.** Is it a valid .txt, .docx or .pdf?", {}, [], None
+    if len(content) > MAX_TEXT_CHARS:
+        return (f"The text is too long ({len(content):,} characters); the limit is "
+                f"{MAX_TEXT_CHARS:,}. Please use a shorter excerpt."), {}, [], None
     if len(content.split()) < 5:
         return "Please paste or upload some text (at least a few sentences).", {}, [], None
 
-    result = holder.model.predict(content)
+    try:
+        result = holder.model.predict(content)
+    except Exception:
+        logger.exception("prediction failed")
+        return "**The model could not analyze this text.**", {}, [], None
     probs = {LABEL_AI: result["ai_probability"], LABEL_HUMAN: result["human_probability"]}
     state = {
         "text": content,
@@ -172,6 +208,12 @@ def submit_feedback(state: Optional[Dict[str, Any]], thumbs: Optional[str],
         return "Analyze a text first, then leave feedback."
     if not thumbs and not correct_label and not (comment or "").strip():
         return "Pick a thumbs up/down, a correct label, or write a comment."
+    if thumbs and thumbs not in THUMBS:
+        return "Thumbs must be up or down."
+    if correct_label and correct_label not in (LABEL_AI, LABEL_HUMAN):
+        return "Choose a valid correct label."
+    if len(comment or "") > MAX_COMMENT_CHARS:
+        return f"Please keep the comment under {MAX_COMMENT_CHARS:,} characters."
     path = Path(csv_path or feedback_path())
     if path.parent != Path(""):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,7 +228,7 @@ def submit_feedback(state: Optional[Dict[str, Any]], thumbs: Optional[str],
         comment=(comment or "").strip() or None,
         features=state.get("features"),
     )
-    return f"Thanks! Feedback saved to `{path}`."
+    return "Thanks! Feedback saved."
 
 
 def load_feedback_table(csv_path: Optional[Path] = None):
@@ -196,15 +238,21 @@ def load_feedback_table(csv_path: Optional[Path] = None):
 
 
 def export_feedback_file(csv_path: Optional[Path] = None) -> str:
+    """Spreadsheet-safe copy of the feedback CSV in a fresh, unguessable temp file."""
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = Path(tempfile.gettempdir()) / f"skolfie_feedback_{stamp}.csv"
-    return feedback_store.export_feedback(os.fspath(csv_path or feedback_path()), os.fspath(out))
+    fd, out = tempfile.mkstemp(prefix=f"skolfie_feedback_{stamp}_", suffix=".csv")
+    os.close(fd)
+    return feedback_store.export_feedback(os.fspath(csv_path or feedback_path()), out)
 
 
 def add_manual_example(text: Optional[str], label: Optional[str], comment: Optional[str],
                        csv_path: Optional[Path] = None) -> str:
     if not (text or "").strip():
         return "Enter some text first."
+    if len(text) > MAX_TEXT_CHARS:
+        return f"The text is too long; the limit is {MAX_TEXT_CHARS:,} characters."
+    if len(comment or "") > MAX_COMMENT_CHARS:
+        return f"Please keep the comment under {MAX_COMMENT_CHARS:,} characters."
     if label not in (LABEL_AI, LABEL_HUMAN):
         return "Choose a label."
     feedback_store.add_manual_label(
@@ -241,7 +289,8 @@ def build_app(holder: Optional[ModelHolder] = None):
             with gr.Row():
                 with gr.Column(scale=3):
                     text_in = gr.Textbox(
-                        label="Text", lines=12, placeholder="Paste the text to check here..."
+                        label="Text", lines=12, placeholder="Paste the text to check here...",
+                        max_length=MAX_TEXT_CHARS,
                     )
                     file_in = gr.File(
                         label="...or upload a .txt, .docx or .pdf file "
@@ -261,7 +310,9 @@ def build_app(holder: Optional[ModelHolder] = None):
                 with gr.Row():
                     thumbs_in = gr.Radio(["up", "down"], label="Thumbs")
                     correct_in = gr.Radio([LABEL_AI, LABEL_HUMAN], label="Correct label")
-                comment_in = gr.Textbox(label="Comment (optional)", lines=2)
+                comment_in = gr.Textbox(
+                    label="Comment (optional)", lines=2, max_length=MAX_COMMENT_CHARS
+                )
                 feedback_btn = gr.Button("Submit feedback")
                 feedback_status = gr.Markdown()
 
@@ -277,9 +328,11 @@ def build_app(holder: Optional[ModelHolder] = None):
                 export_btn = gr.Button("Export as CSV")
                 export_file = gr.File(label="Exported dataset", interactive=False)
             with gr.Accordion("Add a labeled example manually", open=False):
-                manual_text = gr.Textbox(label="Text", lines=6)
+                manual_text = gr.Textbox(label="Text", lines=6, max_length=MAX_TEXT_CHARS)
                 manual_label = gr.Radio([LABEL_AI, LABEL_HUMAN], label="Label")
-                manual_comment = gr.Textbox(label="Comment (optional)")
+                manual_comment = gr.Textbox(
+                    label="Comment (optional)", max_length=MAX_COMMENT_CHARS
+                )
                 manual_btn = gr.Button("Add example")
                 manual_status = gr.Markdown()
 
@@ -336,10 +389,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument(
         "--port", type=int, default=int(os.environ.get("GRADIO_SERVER_PORT", "7860"))
     )
-    parser.add_argument("--share", action="store_true", help="Create a public Gradio share link.")
+    parser.add_argument(
+        "--share", action="store_true",
+        help="Create a public Gradio share link (anyone with it can read collected feedback).",
+    )
     args = parser.parse_args(argv)
 
-    build_app().launch(server_name=args.host, server_port=args.port, share=args.share)
+    if args.share or args.host not in ("127.0.0.1", "localhost", "::1"):
+        print("[warning] the app is reachable beyond this machine: anyone who can open it "
+              "can read and export every collected feedback text.")
+    build_app().launch(server_name=args.host, server_port=args.port, share=args.share,
+                       max_file_size=MAX_FILE_BYTES)
 
 
 if __name__ == "__main__":

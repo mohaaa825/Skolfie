@@ -26,7 +26,7 @@ _MISSING = object()
 
 def iter_jsonl(path: Path) -> Iterator[tuple[int, dict]]:
     """Yield `(line_index, row)` for each non-blank line; line_index counts from 0."""
-    with open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8-sig") as fh:  # -sig: tolerate a leading BOM
         index = -1
         for lineno, line in enumerate(fh, start=1):
             if not line.strip():

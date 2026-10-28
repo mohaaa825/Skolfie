@@ -263,7 +263,7 @@ def _load_source(
         try:
             rec = _coerce_record(item)
             if not isinstance(rec.id, str) or not rec.id:
-                raise ValueError("empty id")
+                raise ValueError(f"id must be a non-empty string, got {rec.id!r}")
         except (TypeError, ValueError, KeyError) as exc:
             counts["invalid"] += 1
             if counts["invalid"] <= 3:
@@ -271,7 +271,7 @@ def _load_source(
             continue
         text = clean_text(rec.text)
         n_words = count_words(text)
-        if n_words < min_words:
+        if n_words < min_words or n_words == 0:  # an empty text is never kept
             counts["too_short"] += 1
             continue
         if n_words > max_words:
@@ -367,10 +367,8 @@ def _file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+def _tmp_path(path: Path) -> Path:
+    return path.with_name(path.name + ".tmp")
 
 
 def build_corpus(
@@ -507,62 +505,73 @@ def build_corpus(
     parquet_path = out_dir / "corpus.parquet"
     manifest_path = out_dir / "manifest.json"
     stats_path = out_dir / "stats.md"
-    tmp_parquet = parquet_path.with_name(parquet_path.name + ".tmp")
-    content_hash = hashlib.sha256()
-    combo: Counter = Counter()
-    with pq.ParquetWriter(tmp_parquet, SCHEMA, compression="zstd") as writer:
-        for start in range(0, len(order), ROW_GROUP_SIZE):
-            part = table.take(pa.array(order[start:start + ROW_GROUP_SIZE], type=pa.int64()))
-            writer.write_table(part, row_group_size=ROW_GROUP_SIZE)
-            _update_content_hash(content_hash, part)
-            combo.update(zip(part.column("label").to_pylist(),
-                             part.column("generator").to_pylist(),
-                             part.column("domain").to_pylist()))
-    os.replace(tmp_parquet, parquet_path)
-    del table, order, part
+    # Everything is written to *.tmp and renamed only once all three files are
+    # complete, so an interrupted build never leaves a corpus.parquet that
+    # disagrees with manifest.json, nor stray .tmp files.
+    tmp_paths = [_tmp_path(p) for p in (parquet_path, manifest_path, stats_path)]
+    try:
+        content_hash = hashlib.sha256()
+        combo: Counter = Counter()
+        with pq.ParquetWriter(tmp_paths[0], SCHEMA, compression="zstd") as writer:
+            for start in range(0, len(order), ROW_GROUP_SIZE):
+                part = table.take(pa.array(order[start:start + ROW_GROUP_SIZE], type=pa.int64()))
+                writer.write_table(part, row_group_size=ROW_GROUP_SIZE)
+                _update_content_hash(content_hash, part)
+                combo.update(zip(part.column("label").to_pylist(),
+                                 part.column("generator").to_pylist(),
+                                 part.column("domain").to_pylist()))
+        del table, order, part
 
-    content_sha = content_hash.hexdigest()
-    corpus_version = f"v-{content_sha[:16]}"
-    counts = [
-        {"label": lab, "generator": gen, "domain": dom, "count": n}
-        for (lab, gen, dom), n in sorted(combo.items())
-    ]
+        content_sha = content_hash.hexdigest()
+        corpus_version = f"v-{content_sha[:16]}"
+        counts = [
+            {"label": lab, "generator": gen, "domain": dom, "count": n}
+            for (lab, gen, dom), n in sorted(combo.items())
+        ]
 
-    manifest: dict[str, Any] = {
-        "corpus_version": corpus_version,
-        "content_sha256": content_sha,
-        "parquet_sha256": _file_sha256(parquet_path),
-        "parquet_file": parquet_path.name,
-        "n_records": n_records,
-        "columns": list(COLUMNS),
-        "build_time": started.isoformat(timespec="seconds"),
-        **_git_info(),
-        "versions": {"pyarrow": pa.__version__},
-        "parameters": {
-            "sources": names,
-            "raw_dir": str(raw_dir),
-            "min_words": min_words,
-            "max_words": max_words,
-            "download": download,
-            "seed": seed,
-            "balance": balance,
-            "strict": strict,
-            "dedupe": "exact (normalised: case-folded, punctuation/whitespace removed)",
-            "near_dedupe": False,
-        },
-        "sources": source_stats,
-        "errors": errors,
-        "warnings": warnings,
-        "counts": counts,
-        "totals": {
-            "label": _sum_by(counts, "label"),
-            "domain": _sum_by(counts, "domain"),
-            "generator": _sum_by(counts, "generator"),
-        },
-    }
-    stats_md = render_stats(manifest)
-    _atomic_write_text(manifest_path, json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
-    _atomic_write_text(stats_path, stats_md)
+        manifest: dict[str, Any] = {
+            "corpus_version": corpus_version,
+            "content_sha256": content_sha,
+            "parquet_sha256": _file_sha256(tmp_paths[0]),
+            "parquet_file": parquet_path.name,
+            "n_records": n_records,
+            "columns": list(COLUMNS),
+            "build_time": started.isoformat(timespec="seconds"),
+            **_git_info(),
+            "versions": {"pyarrow": pa.__version__},
+            "parameters": {
+                "sources": names,
+                "raw_dir": str(raw_dir),
+                "min_words": min_words,
+                "max_words": max_words,
+                "download": download,
+                "seed": seed,
+                "balance": balance,
+                "strict": strict,
+                "dedupe": "exact (normalised: case-folded, punctuation/whitespace removed)",
+                "near_dedupe": False,
+            },
+            "sources": source_stats,
+            "errors": errors,
+            "warnings": warnings,
+            "counts": counts,
+            "totals": {
+                "label": _sum_by(counts, "label"),
+                "domain": _sum_by(counts, "domain"),
+                "generator": _sum_by(counts, "generator"),
+            },
+        }
+        stats_md = render_stats(manifest)
+        tmp_paths[1].write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        tmp_paths[2].write_text(stats_md, encoding="utf-8")
+        for tmp, final in zip(tmp_paths, (parquet_path, manifest_path, stats_path)):
+            os.replace(tmp, final)
+    except BaseException:
+        for tmp in tmp_paths:
+            tmp.unlink(missing_ok=True)
+        raise
     log.info("wrote %d records to %s (%s)", n_records, parquet_path, corpus_version)
 
     return CorpusResult(

@@ -160,10 +160,12 @@ def chunk_settings(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     if args.mixed_report is not None:
         if not args.mixed_report.is_file():
             parser.error(f"mixed report not found: {args.mixed_report}")
-        report = json.loads(args.mixed_report.read_text(encoding="utf-8"))
         try:
+            report = json.loads(args.mixed_report.read_text(encoding="utf-8"))
             params = dict(report["rules"]["chunk"]["params"])
-        except (KeyError, TypeError):
+        except json.JSONDecodeError as exc:
+            parser.error(f"{args.mixed_report} is not valid JSON ({exc}); rerun eval_mixed.py")
+        except (KeyError, TypeError, ValueError):
             parser.error(f"{args.mixed_report} has no rules.chunk.params")
         chunking = dict(report.get("chunking") or {})
     if args.chunk_lo is not None or args.chunk_hi is not None:

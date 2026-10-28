@@ -181,7 +181,9 @@ def load(raw_dir: Path, download: bool = True) -> Iterator[Record]:
             if not isinstance(text, str) or not text.strip():
                 continue
             label, generator = _label_and_generator(row, where)
-            local_id = pick(row, ID_KEYS, where, "id", default=index)
+            local_id = pick(row, ID_KEYS, where, "id", default=None)
+            if local_id is None or str(local_id).strip() == "":
+                local_id = index  # a null id would make every such row collide
             split = pick(row, SPLIT_KEYS, where, "split", default=file_split) or ""
             yield Record(
                 id=f"{NAME}:{rel}:{local_id}", text=text.strip(), label=label,

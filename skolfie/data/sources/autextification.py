@@ -178,7 +178,7 @@ def _read_rows(path: Path) -> Iterator[tuple[int, dict, list[str] | None]]:
     suffix = path.suffix.lower()
     if suffix in _ORIGINAL_SUFFIXES:
         csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
-        with open(path, encoding="utf-8", newline="") as fh:
+        with open(path, encoding="utf-8-sig", newline="") as fh:  # BOM would rename column 1
             reader = csv.DictReader(fh, delimiter="\t" if suffix == ".tsv" else ",")
             for index, row in enumerate(reader):
                 yield index, row, None

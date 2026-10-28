@@ -32,6 +32,7 @@ report prints.
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any, Callable, Sequence
 
@@ -44,6 +45,17 @@ from skolfie.eval.metrics import to_binary
 STYLE_CACHE_VERSION = 1
 LM_CACHE_VERSION = 1
 CLASSIFIERS = ("lgbm", "rf")
+# Share of the training rows held out to pick the number of LightGBM trees.
+LGBM_EARLY_STOP_FRACTION = 0.05
+
+
+def as_text(t: Any) -> str:
+    """A text as str; None and NaN (missing values in a frame) become ""."""
+    if isinstance(t, str):
+        return t
+    if t is None or (isinstance(t, float) and math.isnan(t)):
+        return ""
+    return str(t)
 
 
 class FeatureModel:
@@ -138,7 +150,7 @@ class FeatureModel:
 
         Needs no fitting; the transformer model (step 5) reuses it.
         """
-        return self._base_features(list(texts))
+        return self._base_features([as_text(t) for t in texts])
 
     def _base_features(self, texts: list[str]) -> tuple[np.ndarray, list[str]]:
         from skolfie.features.style import STYLE_FEATURES
@@ -172,7 +184,7 @@ class FeatureModel:
         """Feature matrix for new texts (columns in `feature_names_` order)."""
         if self.delta_ is None:
             raise RuntimeError("FeatureModel is not fitted")
-        texts = list(texts)
+        texts = [as_text(t) for t in texts]
         base, _ = self._base_features(texts)
         return np.hstack([base, self.delta_.transform(texts)])
 
@@ -191,8 +203,10 @@ class FeatureModel:
         from sklearn.model_selection import train_test_split
 
         # A small internal hold-out picks the number of trees; the harness's
-        # own val split stays untouched.
-        X_tr, X_es, y_tr, y_es = train_test_split(X, y, test_size=0.05, stratify=y,
+        # own val split stays untouched. At least one row per class is held
+        # out (a fraction alone fails on small training sets).
+        n_es = max(math.ceil(LGBM_EARLY_STOP_FRACTION * len(y)), 2)
+        X_tr, X_es, y_tr, y_es = train_test_split(X, y, test_size=n_es, stratify=y,
                                                   random_state=self.seed)
         kwargs = self._lgbm_kwargs()
         # Small training sets (tests, quick runs) could not split at all otherwise.
@@ -219,7 +233,7 @@ class FeatureModel:
     def fit(self, texts: Sequence[str], labels: Sequence[Any]) -> "FeatureModel":
         from skolfie.features.delta_features import DELTA_FEATURES
 
-        texts = list(texts)
+        texts = [as_text(t) for t in texts]
         y = to_binary(labels)
         if len(texts) != len(y):
             raise ValueError("texts and labels must have the same length")

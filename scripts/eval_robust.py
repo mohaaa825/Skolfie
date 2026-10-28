@@ -109,7 +109,8 @@ def threshold_at_fpr(p_human: Any, max_fpr: float) -> float:
     """Lowest cut-off t (AI iff p >= t) that flags at most max_fpr of these human texts."""
     import numpy as np
 
-    s = np.sort(np.asarray(p_human, dtype=np.float64))[::-1]
+    s = np.asarray(p_human, dtype=np.float64)
+    s = np.sort(s[~np.isnan(s)])[::-1]  # a NaN would sort first and become the cut-off
     if s.size == 0:
         return math.nan
     k = int(math.floor(max_fpr * s.size + 1e-9))  # texts allowed above the cut-off
@@ -235,6 +236,11 @@ def _pct(x: Any) -> str:
     return f"{100 * x:.1f}%"
 
 
+def _neg(x: Any) -> Any:
+    """-x, keeping None (a NaN after `_json_safe`) as None."""
+    return None if x is None else -x
+
+
 def _signed(x: Any, pct: bool = False) -> str:
     if x is None or (isinstance(x, float) and math.isnan(x)):
         return "n/a"
@@ -276,10 +282,10 @@ def render_md(report: dict[str, Any]) -> str:
             both = r["applies_to"] == "both"
             rows.append([
                 attack, f"{r['n_ai']:,} / {r['n_human']:,}", _pct(r.get("mean_word_change")),
-                _fmt(r["auroc"]), _signed(-r["auroc_drop"]),
+                _fmt(r["auroc"]), _signed(_neg(r["auroc_drop"])),
                 _fmt(r.get("auroc_both")) if both else "",
-                _pct(r["recall_05"]), _signed(-r["recall_05_drop"], pct=True),
-                _pct(r["recall_thr"]), _signed(-r["recall_thr_drop"], pct=True),
+                _pct(r["recall_05"]), _signed(_neg(r["recall_05_drop"]), pct=True),
+                _pct(r["recall_thr"]), _signed(_neg(r["recall_thr_drop"]), pct=True),
                 _pct(r.get("fpr_05")) if both else "", _pct(r.get("fpr_thr")) if both else "",
                 _signed(r.get("fpr_thr_rise"), pct=True) if both else ""])
         lines += _table(["attack", "AI / human", "words changed", "AUROC", "Δ", "AUROC (both)",
@@ -297,7 +303,7 @@ def render_md(report: dict[str, Any]) -> str:
             row = [attack]
             for n in names:
                 r = models[n]["attacks"].get(attack)
-                row += ["n/a", "n/a"] if r is None else [_signed(-r["auroc_drop"]),
+                row += ["n/a", "n/a"] if r is None else [_signed(_neg(r["auroc_drop"])),
                                                          _pct(r["recall_thr"])]
             rows.append(row)
         rows.append(["clean"] + [c for n in names for c in (

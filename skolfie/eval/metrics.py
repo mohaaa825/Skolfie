@@ -50,17 +50,25 @@ def to_binary(labels: Iterable[Any]) -> np.ndarray:
             else:
                 raise ValueError(f"unknown label {lab!r}; expected 'human' or 'ai'")
         else:
-            val = int(lab)
-            if val not in (0, 1):
+            try:
+                val = int(lab)
+            except (TypeError, ValueError):
+                val = -1
+            if val not in (0, 1) or val != lab:  # 0.7 must not silently become 0
                 raise ValueError(f"unknown label {lab!r}; expected 0 (human) or 1 (ai)")
             out.append(val)
     return np.asarray(out, dtype=np.int64)
 
 
 def _as_arrays(y_true: Sequence[Any], p_ai: Sequence[float]) -> tuple[np.ndarray, np.ndarray]:
-    y = to_binary(y_true) if len(y_true) and isinstance(next(iter(y_true)), str) else (
-        np.asarray(y_true, dtype=np.int64)
-    )
+    if len(y_true) and isinstance(next(iter(y_true)), str):
+        y = to_binary(y_true)
+    else:
+        raw = np.asarray(y_true)
+        # Floats such as 0.7 or NaN must not be truncated into a valid label.
+        if raw.dtype.kind not in "biu" and not np.isin(raw.astype(np.float64), (0, 1)).all():
+            raise ValueError("y_true must contain only 0 (human) and 1 (ai)")
+        y = raw.astype(np.int64)
     p = np.asarray(p_ai, dtype=np.float64)
     if y.shape != p.shape or y.ndim != 1:
         raise ValueError(f"y_true and p_ai must be 1-D and equal length, got {y.shape} / {p.shape}")

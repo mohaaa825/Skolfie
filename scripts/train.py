@@ -128,6 +128,18 @@ def load_feedback_data(path: str | os.PathLike[str]) -> Tuple[List[str], List[st
     return texts, labels
 
 
+def drop_duplicate_texts(texts: Sequence[str], labels: Sequence[str]
+                         ) -> Tuple[List[str], List[str], int]:
+    """
+    Keep one row per exact text: the last one, so a reviewed feedback row
+    (loaded after --data) overrides the label of the same text in the data.
+    A text present twice would otherwise land on both sides of --test-size.
+    """
+    last = {text: i for i, text in enumerate(texts)}
+    keep = sorted(last.values())
+    return [texts[i] for i in keep], [labels[i] for i in keep], len(texts) - len(keep)
+
+
 def load_seed_demo() -> Tuple[List[str], List[str]]:
     """The 25 + 25 synthetic texts from the test fixtures (smoke runs only)."""
     _ensure_repo_on_path()
@@ -200,6 +212,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("nothing to train on: pass --data, --feedback and/or --seed-demo")
     if not 0.0 <= args.test_size < 1.0:
         parser.error("--test-size must be in [0, 1)")
+    for flag, path in (("--data", args.data), ("--feedback", args.feedback)):
+        if path is not None and not path.is_file():
+            parser.error(f"{flag}: file not found: {path}")
+    if args.out.is_dir():
+        parser.error(f"--out must be a file path, not a directory: {args.out}")
 
     _ensure_repo_on_path()
 
@@ -222,6 +239,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         labels += lab
         sources.append(f"{args.feedback} feedback ({len(t)})")
 
+    texts, labels, n_dupes = drop_duplicate_texts(texts, labels)
+    if n_dupes:
+        print(f"[data] dropped {n_dupes} duplicate text(s), keeping the last occurrence")
+
     n_ai = labels.count("ai")
     n_human = labels.count("human")
     print(f"[data] {len(texts)} texts from {', '.join(sources)}: {n_human} human / {n_ai} ai")
@@ -237,10 +258,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.test_size > 0:
         from sklearn.model_selection import train_test_split
 
-        train_texts, test_texts, train_labels, test_labels = train_test_split(
-            texts, labels, test_size=args.test_size,
-            random_state=args.random_state, stratify=labels,
-        )
+        try:
+            train_texts, test_texts, train_labels, test_labels = train_test_split(
+                texts, labels, test_size=args.test_size,
+                random_state=args.random_state, stratify=labels,
+            )
+        except ValueError as exc:  # too few texts per class for this split
+            print(f"error: cannot hold out --test-size {args.test_size}: {exc}",
+                  file=sys.stderr)
+            return 2
         print(f"[split] train={len(train_texts)} test={len(test_texts)}")
 
     model = AIDetectorModel()
