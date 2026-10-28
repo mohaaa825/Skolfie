@@ -33,7 +33,7 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 
-from skolfie.explain.reasons import lookup, reason
+from skolfie.explain.reasons import lookup, matches_typical, reason
 
 Reference = dict[str, dict[str, Optional[float]]]
 
@@ -133,8 +133,10 @@ def top_features(names: Sequence[str], values: np.ndarray, contributions: np.nda
             "typical_ai": ref.get("ai"),
             "contribution": contribution,
             "direction": direction,
+            "matches_typical": matches_typical(direction, value, ref.get("human"),
+                                               ref.get("ai")),
             "reason": reason(name, direction, float("nan") if value is None else value,
-                             _typical(ref)),
+                             _typical(ref), ref.get("human"), ref.get("ai")),
         })
     return rows
 
@@ -149,9 +151,11 @@ def explain_features(feature_model: Any, texts: Sequence[str] | None = None,
     `feature_model.featurize`. p_ai and raw_score are the feature model's own
     P(ai) and log-odds (base_value + sum of all contributions). Each top
     feature is {"feature", "group", "value", "typical_human", "typical_ai",
-    "contribution", "direction", "reason"}: contribution in log-odds,
-    direction "ai" if it pushes towards AI else "human", value None when
-    the feature could not be computed, typical_* None without a reference.
+    "contribution", "direction", "matches_typical", "reason"}: contribution
+    in log-odds, direction "ai" if it pushes towards AI else "human", value
+    None when the feature could not be computed, typical_* None without a
+    reference, matches_typical whether the value is on the direction side of
+    the human and AI medians (None when unknown; see `reasons`).
     """
     if X is None:
         if texts is None:

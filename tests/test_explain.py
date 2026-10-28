@@ -16,7 +16,7 @@ import joblib
 import numpy as np
 import pytest
 
-from skolfie.explain.reasons import REASONS, lookup, reason, value_side
+from skolfie.explain.reasons import REASONS, lookup, matches_typical, reason, value_side
 from skolfie.features.delta_features import DELTA_FEATURES
 from skolfie.features.lm import LM_FEATURES
 from skolfie.features.style import STYLE_FEATURES
@@ -56,6 +56,30 @@ def test_reason_wording() -> None:
     assert reason("foo_bar_baz", "human").endswith("typical of human writing")
     with pytest.raises(ValueError):
         reason("sty_mattr50", "maybe")
+
+
+def test_reason_only_claims_typical_when_the_medians_back_it() -> None:
+    # Value on the AI side of the medians: a claim about AI texts in general.
+    assert reason("lm_mean_nll", "ai", value=2.4, typical=3.0, typical_human=3.4,
+                  typical_ai=2.7) == ("highly predictable wording (low perplexity), "
+                                      "typical of AI text")
+    # Pushed towards human although the value is on the AI side (seen in the step 8 review):
+    # say only what the model did.
+    assert reason("sty_hapax50", "human", value=0.58, typical=0.64, typical_human=0.65,
+                  typical_ai=0.63) == ("few one-off words, the same words come back; "
+                                       "the model counts this toward human")
+    # A count most texts lack (both medians 0): "uses", not "many".
+    assert reason("sty_semicolons", "human", value=0.1, typical=0.0, typical_human=0.0,
+                  typical_ai=0.0) == ("uses semicolons (most texts have none); "
+                                      "the model counts this toward human")
+    assert reason("sty_semicolons", "ai", value=0.0, typical=0.0, typical_human=0.0,
+                  typical_ai=0.0) == "few semicolons; the model counts this toward AI"
+    assert matches_typical("ai", 2.4, 3.4, 2.7) is True
+    assert matches_typical("human", 2.4, 3.4, 2.7) is False
+    assert matches_typical("ai", 0.0, 0.0, 0.0) is None
+    assert matches_typical("ai", None, 3.4, 2.7) is None
+    with pytest.raises(ValueError):
+        matches_typical("maybe", 1.0, 2.0, 3.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -155,8 +179,10 @@ def test_explainer_output_shape(trained, tmp_path: Path) -> None:
         assert len(ex["top_features"]) == 5
         assert set(ex["top_features"][0]) == {"feature", "group", "value", "typical_human",
                                               "typical_ai", "contribution", "direction",
-                                              "reason"}
-        assert set(ex["feature_model"]) == {"p_ai", "raw_score", "base_value"}
+                                              "matches_typical", "reason"}
+        assert set(ex["feature_model"]) == {"p_ai", "raw_score", "base_value", "agrees"}
+        assert ex["feature_model"]["agrees"] == (
+            (ex["feature_model"]["p_ai"] >= 0.5) == (ex["verdict"] == "ai"))
         for c in ex["chunks"]:
             assert 0 <= c["start"] <= c["end"] <= len(text)
             assert c["label"] == ("ai" if c["p"] >= 0.5 else "human")
@@ -238,8 +264,24 @@ def _fake_explanation(text: str) -> dict:
                          {"feature": "x|y", "group": "other", "value": None,
                           "typical_human": None, "typical_ai": None, "contribution": -0.5,
                           "direction": "human", "reason": "a | b"}],
-        "feature_model": {"p_ai": 0.8, "raw_score": 1.4, "base_value": 0.1},
+        "feature_model": {"p_ai": 0.8, "raw_score": 1.4, "base_value": 0.1, "agrees": True},
     }
+
+
+def test_render_notes_when_the_feature_model_disagrees() -> None:
+    from skolfie.explain.explainer import feature_model_agrees
+    from skolfie.explain.render import disagreement_note, render_html, render_markdown
+
+    assert feature_model_agrees("ai", 0.37) is False and feature_model_agrees("ai", 0.9)
+    assert feature_model_agrees("human", 0.2) and feature_model_agrees("uncertain", 0.9) is None
+    text = "Some text that the transformer finds very AI-like."
+    ex = _fake_explanation(text)
+    assert disagreement_note(ex) == ""
+    ex["feature_model"].update(p_ai=0.37, agrees=False)
+    note = disagreement_note(ex)
+    assert note.startswith("The style features alone point to human (P(ai) 0.37")
+    assert note in render_html([ex], [text])
+    assert f"> {note}" in render_markdown([ex], [text], cases=[{"id": "a"}])
 
 
 def test_render_html_escapes() -> None:

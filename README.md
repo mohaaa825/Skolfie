@@ -231,8 +231,13 @@ and of pure AI texts, are called Mixed.
 `skolfie.explain.Explainer` gives every verdict its five strongest reasons:
 exact SHAP contributions of the feature model (LightGBM), each with its
 direction and a plain-language reason ("low vocabulary variety, typical of
-AI text"), plus the step 7 chunk scores as a heatmap. The output is plain
-JSON: `{label, verdict, p_ai, chunks, highlights, top_features}`.
+AI text"), plus the step 7 chunk scores as a heatmap. "Typical of AI text"
+is only said when the value really is closer to the AI median on reference
+texts; otherwise the reason says what the model did ("...; the model counts
+this toward AI"). When the feature model alone points the other way from the
+verdict, the explanation says so (`feature_model.agrees`), since its features
+then do not explain the verdict. The output is plain JSON:
+`{label, verdict, p_ai, chunks, highlights, top_features, feature_model}`.
 `scripts/explain.py` writes a review sheet for 20 random test texts
 (`review.md` to fill in by hand, `review.html` to read); in Colab use
 [`notebooks/explain.ipynb`](notebooks/explain.ipynb).
