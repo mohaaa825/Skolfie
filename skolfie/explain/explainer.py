@@ -17,8 +17,11 @@ together, for each text:
                   `highlight`)
     top_features  the feature model's top-k SHAP features (see
                   `skolfie.explain.contributions.explain_features`)
-    feature_model {"p_ai", "raw_score", "base_value"} of the feature model,
-                  so a reader can see when it disagrees with the verdict
+    feature_model {"p_ai", "raw_score", "base_value", "agrees"} of the feature
+                  model; agrees is False when it alone would say the other
+                  side (P(ai) on the other side of 0.5 than an AI / human
+                  verdict), so its top features do not explain the verdict,
+                  and None for an uncertain verdict
 
 Offsets are character offsets into the text, so `text[start:end]` is the
 span. Everything is plain Python (floats, ints, strings, None), so the dict
@@ -83,6 +86,13 @@ def find_feature_model(model: Any) -> Any:
             if isinstance(obj, FeatureModel):
                 return obj
     return None
+
+
+def feature_model_agrees(verdict: str, feature_p_ai: float) -> Optional[bool]:
+    """Whether the feature model alone lands on the verdict's side (None: no side)."""
+    if verdict not in ("human", "ai"):
+        return None
+    return (feature_p_ai >= AI_THRESHOLD) == (verdict == "ai")
 
 
 class _ChunkScorer:
@@ -191,7 +201,9 @@ class Explainer:
                            for s, e, cp in chunks],
                 "highlights": highlight(text, chunks, threshold=self.highlight_threshold),
                 "top_features": feats[i]["top_features"],
-                "feature_model": {k: feats[i][k] for k in ("p_ai", "raw_score", "base_value")},
+                "feature_model": {
+                    **{k: feats[i][k] for k in ("p_ai", "raw_score", "base_value")},
+                    "agrees": feature_model_agrees(verdicts[i], feats[i]["p_ai"])},
             }))
         return out
 

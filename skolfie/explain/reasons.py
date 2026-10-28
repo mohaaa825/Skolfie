@@ -26,6 +26,15 @@ tree model can learn the unexpected side, and the phrase then still
 describes the text truthfully. Without `typical` the side is inferred from
 `direction` and `ai_side`, i.e. the expected mapping is assumed. Unknown
 feature names get a generic phrase built from the name.
+
+"typical of AI text" is a claim about AI texts in general, so with the
+human and AI medians known it is only made when the value sits on the
+`direction` side of them (`matches_typical`). Otherwise the tree model
+learned something the medians do not show (an interaction, or a feature
+whose medians are equal), and the reason says only what the model did:
+"many words used only once; the model counts this toward AI". A count
+feature that most texts lack (both medians 0) reads "uses semicolons (most
+texts have none)" instead of "many semicolons".
 """
 
 from __future__ import annotations
@@ -36,6 +45,8 @@ from typing import Optional
 
 DIRECTIONS = ("ai", "human")
 _SUFFIX = {"ai": "typical of AI text", "human": "typical of human writing"}
+_MODEL_SUFFIX = {"ai": "the model counts this toward AI",
+                 "human": "the model counts this toward human"}
 
 
 @dataclass(frozen=True)
@@ -228,8 +239,26 @@ def value_side(name: str, direction: str, value: Optional[float] = None,
     return "low" if ai_side == "high" else "high"
 
 
+def matches_typical(direction: str, value: Optional[float], typical_human: Optional[float],
+                    typical_ai: Optional[float]) -> Optional[bool]:
+    """
+    Whether `value` sits on the `direction` side of the human and AI medians
+    (closer to that class's median); None when that cannot be told (a value or
+    median is missing, or the two medians are equal).
+    """
+    if direction not in DIRECTIONS:
+        raise ValueError(f"direction must be one of {DIRECTIONS}, got {direction!r}")
+    if _missing(value) or _missing(typical_human) or _missing(typical_ai):
+        return None
+    if typical_human == typical_ai:
+        return None
+    closer = "human" if abs(value - typical_human) < abs(value - typical_ai) else "ai"
+    return closer == direction
+
+
 def reason(name: str, direction: str, value: Optional[float] = None,
-           typical: Optional[float] = None) -> str:
+           typical: Optional[float] = None, typical_human: Optional[float] = None,
+           typical_ai: Optional[float] = None) -> str:
     """One plain-language sentence, e.g. "low vocabulary variety, typical of AI text"."""
     entry = lookup(name)
     if direction not in DIRECTIONS:
@@ -237,6 +266,12 @@ def reason(name: str, direction: str, value: Optional[float] = None,
     if value is not None and _missing(value):
         # LightGBM routes missing values down a learned branch, so they can still count.
         return f"{entry.title} could not be measured (text too short), {_SUFFIX[direction]}"
-    side = value_side(name, direction, value, typical)
-    phrase = {"low": entry.low, "high": entry.high}.get(side or "", entry.title)
+    has_medians = not (_missing(typical_human) or _missing(typical_ai))
+    if has_medians and typical_human == typical_ai == 0 and not _missing(value) and value > 0:
+        phrase = f"uses {entry.title} (most texts have none)"
+    else:
+        side = value_side(name, direction, value, typical)
+        phrase = {"low": entry.low, "high": entry.high}.get(side or "", entry.title)
+    if has_medians and not matches_typical(direction, value, typical_human, typical_ai):
+        return f"{phrase}; {_MODEL_SUFFIX[direction]}"
     return f"{phrase}, {_SUFFIX[direction]}"

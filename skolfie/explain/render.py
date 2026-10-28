@@ -36,6 +36,7 @@ body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0 
 h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin: 0 0 8px; }
 .case { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 20px 0; }
 .meta { color: #555; font-size: 0.9rem; margin-bottom: 8px; }
+.note { color: #8a5a00; font-size: 0.9rem; margin: 0 0 8px; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; color: #fff;
          font-weight: 600; font-size: 0.85rem; }
 .text { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid #eee;
@@ -117,6 +118,16 @@ def _features_html(rows: Sequence[dict]) -> str:
     return "".join(out)
 
 
+def disagreement_note(ex: dict) -> str:
+    """A plain-text warning when the feature model alone points the other way, else ""."""
+    fm = ex.get("feature_model") or {}
+    if fm.get("agrees") is not False:
+        return ""
+    side = "AI" if (fm.get("p_ai") or 0) >= 0.5 else "human"
+    return (f"The style features alone point to {side} (P(ai) {_fmt(fm.get('p_ai'))}), so the "
+            "verdict rests mainly on the other model(s) and these features do not explain it.")
+
+
 def render_html(explanations: Sequence[dict], texts: Sequence[str],
                 captions: Optional[Sequence[str]] = None,
                 title: str = "Skolfie explanations") -> str:
@@ -139,12 +150,15 @@ def render_html(explanations: Sequence[dict], texts: Sequence[str],
         verdict_note = ""
         if ex.get("verdict") and ex["verdict"] != ex["label"]:
             verdict_note = f" (verdict without the chunk rule: {html.escape(ex['verdict'])})"
+        note = disagreement_note(ex)
+        note = f'<p class="note">{html.escape(note)}</p>' if note else ""
         body.append(
             '<section class="case">'
             f"<h2>{html.escape(caption)}</h2>"
             f'<div class="meta">{_badge(ex["label"])} P(ai) {_num(ex["p_ai"], ".3f")}{verdict_note}'
             f" &middot; feature model P(ai) {_fmt(fm.get('p_ai'))}"
             f" &middot; {len(ex.get('chunks') or [])} chunk(s)</div>"
+            f"{note}"
             f'<div class="text">{_heatmap_html(text, ex.get("chunks") or [])}</div>'
             f"{_features_html(ex.get('top_features') or [])}"
             "</section>")
@@ -209,6 +223,7 @@ def render_markdown(explanations: Sequence[dict], texts: Sequence[str],
     lines += ["", "## Cases", ""]
     for i, (ex, text, case) in enumerate(zip(explanations, texts, cases), 1):
         fm = ex.get("feature_model") or {}
+        note = disagreement_note(ex)
         lines += [
             f"### {i}. {md_escape(case.get('id', f'text {i}'))}",
             "",
@@ -218,6 +233,7 @@ def render_markdown(explanations: Sequence[dict], texts: Sequence[str],
                if ex.get("verdict") and ex["verdict"] != ex["label"] else "")
             + f"); feature model P(ai) {_fmt(fm.get('p_ai'))}.",
             "",
+            *([f"> {md_escape(note)}", ""] if note else []),
             "| # | feature | value | typical human / AI | SHAP (log-odds) | towards | reason |",
             "|---:|---|---:|---:|---:|---|---|",
         ]
