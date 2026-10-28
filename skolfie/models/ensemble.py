@@ -21,6 +21,11 @@ they are computed out-of-fold (each row scored by a Delta model fitted on
 the other folds); scoring a row with a Delta model fitted on that same row
 leaks its label, so the ML members learned to over-trust the Delta columns.
 
+train() and predict() map texts through
+`skolfie.robust.normalize.normalize_for_scoring` (invisible characters and
+look-alike letters undone); predict() also returns the `obfuscation_stats`
+of the text as given, which the app shows as a warning.
+
 Saved models are joblib pickles: `load()` runs code from the file, so only
 load models you trained yourself, from a path you control.
 """
@@ -48,6 +53,7 @@ from skolfie.features.stylometric import (
     features_to_vector,
     tokenize_words,
 )
+from skolfie.robust.normalize import normalize_for_scoring, obfuscation_stats
 
 # Weight given to the Burrows' Delta signal vs. the ML ensemble signal when
 # blending the final probability. The ML ensemble generally becomes more
@@ -197,6 +203,7 @@ class AIDetectorModel:
         texts  : list of raw text strings
         labels : matching list of "human" / "ai" string labels
         """
+        texts = [normalize_for_scoring(t) for t in texts]
         tokens_list = [tokenize_words(t) for t in texts]
         self.burrows_model.fit(
             tokens_list, labels, n_words=BURROWS_N_WORDS, candidate_vocab=FUNCTION_WORDS
@@ -238,6 +245,8 @@ class AIDetectorModel:
                 "Model has not been trained yet. Call train() or load a saved model."
             )
 
+        obfuscation = obfuscation_stats(text)
+        text = normalize_for_scoring(text)
         tokens = tokenize_words(text)
         burrows_result = self.burrows_model.score(tokens)
         raw_features = self.feature_extractor.extract_features(text)
@@ -279,6 +288,7 @@ class AIDetectorModel:
             "burrows_top_words": top_words,
             "top_features": top_features,
             "raw_features": raw_features,
+            "obfuscation": obfuscation,
         }
 
     # -----------------------------------------------------------------

@@ -258,6 +258,15 @@ and `evaluate.py --extra-train PATH` adds them to the training set
 (attacked copies of evaluation texts are dropped). In Colab use
 [`notebooks/robust.ipynb`](notebooks/robust.ipynb).
 
+Against the Unicode tricks, every model first runs the text through
+`skolfie.robust.normalize.normalize_for_scoring` (in training and at
+scoring): invisible characters are deleted, fullwidth and other disguised
+letters are folded, and Cyrillic or Greek look-alikes become Latin letters,
+but only inside Latin words, so real Russian or Greek text is untouched.
+What it undid is reported as the explanation's `obfuscation` counts and
+shown as a warning in `review.html`, `review.md` and the app, since
+ordinary text rarely contains either.
+
 ## Train (old prototype)
 
 ```bash

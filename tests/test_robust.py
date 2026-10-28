@@ -532,6 +532,39 @@ def test_eval_robust_end_to_end(data, capsys) -> None:
                      str(data["root"] / "missing.joblib")])
 
 
+def test_eval_robust_scores_a_stacked_model(data) -> None:
+    # The product model is a StackedModel that loads its members itself; the
+    # Unicode attacks no longer move any score (the models normalise text).
+    from skolfie.models.stacker import StackedModel, Stacker, operating_points
+
+    make = _load_script("make_attacks")
+    attacks_dir = data["root"] / "attacks-unicode"
+    assert make.main(_make_argv(data, attacks_dir, "--n", "20", "--provider", "none",
+                                "--attacks", "homoglyph,zero_width")) == 0
+    rows = pd.read_parquet(attacks_dir / "attacks.parquet")
+    members = {"tfidf": data["tfidf"], "length": data["length"]}
+    texts, labels = rows["text"].tolist(), rows["label"].tolist()
+    P = np.column_stack([joblib.load(path).predict_proba(texts) for path in members.values()])
+    stacker = Stacker().fit(P, labels)
+    joblib.dump(StackedModel(members, stacker,
+                             operating_points(labels, stacker.predict_proba(P))),
+                data["root"] / "stacked.joblib")
+
+    script = _load_script("eval_robust")
+    out = data["root"] / "robust-stacked"
+    assert script.main(["--attacks", str(attacks_dir / "attacks.parquet"), "--model",
+                        f"stacked={data['root'] / 'stacked.joblib'}",
+                        "--out-dir", str(out)]) == 0
+    report = json.loads((out / "robust_report.json").read_text())
+    stacked = report["models"]["stacked"]
+    assert list(stacked["attacks"]) == ["homoglyph", "zero_width"]
+    for r in stacked["attacks"].values():
+        assert r["n_ai"] > 0 and r["n_human"] > 0
+        assert r["auroc_drop"] == pytest.approx(0, abs=1e-9)
+        assert r["recall_thr_drop"] == r["fpr_thr_rise"] == 0
+        assert r["mean_p_ai"] == pytest.approx(r["mean_p_ai_clean"])
+
+
 def test_roadmap_check() -> None:
     script = _load_script("eval_robust")
     ref = {"clean": {"fpr_05": 0.02, "fpr_at_95tpr": 0.1},

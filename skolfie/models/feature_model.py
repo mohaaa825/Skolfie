@@ -14,6 +14,12 @@ Features (one row per text):
 
 Classifier: LightGBM (default) or a random forest for comparison.
 
+Every text goes through `scoring_texts()` first (`as_text`, then
+`skolfie.robust.normalize.normalize_for_scoring`: invisible characters and
+look-alike letters undone) in fit, featurize and base_features alike, so the
+features, their cache keys and the Delta profiles all see the same text, and
+models pickled before this step get it too.
+
 Leakage: the Delta profiles are learned from labelled texts, so a text's
 own label would leak into its Delta features if the profiles were fitted on
 the whole training split. `fit()` therefore computes the training rows'
@@ -39,6 +45,7 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from skolfie.eval.metrics import to_binary
+from skolfie.robust.normalize import normalize_for_scoring
 
 # Bump when a feature formula changes without its name changing, so the
 # on-disk caches are rebuilt.
@@ -56,6 +63,11 @@ def as_text(t: Any) -> str:
     if t is None or (isinstance(t, float) and math.isnan(t)):
         return ""
     return str(t)
+
+
+def scoring_texts(texts: Sequence[Any]) -> list[str]:
+    """Texts as the models see them: `as_text`, then `normalize_for_scoring`."""
+    return [normalize_for_scoring(as_text(t)) for t in texts]
 
 
 class FeatureModel:
@@ -150,7 +162,7 @@ class FeatureModel:
 
         Needs no fitting; the transformer model (step 5) reuses it.
         """
-        return self._base_features([as_text(t) for t in texts])
+        return self._base_features(scoring_texts(texts))
 
     def _base_features(self, texts: list[str]) -> tuple[np.ndarray, list[str]]:
         from skolfie.features.style import STYLE_FEATURES
@@ -184,7 +196,7 @@ class FeatureModel:
         """Feature matrix for new texts (columns in `feature_names_` order)."""
         if self.delta_ is None:
             raise RuntimeError("FeatureModel is not fitted")
-        texts = [as_text(t) for t in texts]
+        texts = scoring_texts(texts)
         base, _ = self._base_features(texts)
         return np.hstack([base, self.delta_.transform(texts)])
 
@@ -233,7 +245,7 @@ class FeatureModel:
     def fit(self, texts: Sequence[str], labels: Sequence[Any]) -> "FeatureModel":
         from skolfie.features.delta_features import DELTA_FEATURES
 
-        texts = [as_text(t) for t in texts]
+        texts = scoring_texts(texts)
         y = to_binary(labels)
         if len(texts) != len(y):
             raise ValueError("texts and labels must have the same length")

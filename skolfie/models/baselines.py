@@ -25,6 +25,10 @@ The feature model (roadmap step 4) lives in `skolfie.models.feature_model`
 and the DistilBERT + features model (step 5) in
 `skolfie.models.transformer_model`; `make_scorer` builds them for the
 `features*` and `transformer*` specs.
+
+LengthBaseline and TfidfLRBaseline map their input through
+`skolfie.robust.normalize.normalize_for_scoring` like the real models, so
+look-alike letters and invisible characters do not move them either.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ from typing import Any, Protocol, Sequence, runtime_checkable
 import numpy as np
 
 from skolfie.eval.metrics import to_binary
+from skolfie.robust.normalize import normalize_for_scoring
 
 
 @runtime_checkable
@@ -80,7 +85,8 @@ class LengthBaseline:
 
     @staticmethod
     def featurize(texts: Sequence[str]) -> np.ndarray:
-        return np.asarray([shallow_features(t) for t in texts], dtype=np.float64).reshape(-1, 3)
+        return np.asarray([shallow_features(normalize_for_scoring(t)) for t in texts],
+                          dtype=np.float64).reshape(-1, 3)
 
     def fit(self, texts: Sequence[str], labels: Sequence[Any]) -> "LengthBaseline":
         from sklearn.linear_model import LogisticRegression
@@ -159,7 +165,7 @@ class TfidfLRBaseline:
             "chunk_size", "C", "max_iter", "seed")}
 
     def _clip(self, texts: Sequence[str]) -> list[str]:
-        return [t[: self.max_chars] for t in texts]
+        return [normalize_for_scoring(t[: self.max_chars]) for t in texts]
 
     def _transform(self, texts: Sequence[str]) -> Any:
         texts = self._clip(texts)

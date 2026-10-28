@@ -372,6 +372,38 @@ def test_chunk_training_adds_labelled_chunks_of_training_texts_only(tokenizer, c
     assert old.chunk_augment == 0 and "n_chunks" not in old.params()
 
 
+def test_unicode_tricks_are_undone_in_fit_and_predict(fitted, tokenizer, corpus,
+                                                       monkeypatch) -> None:
+    from skolfie.robust.attacks import homoglyph_text, text_rng, zero_width_text
+
+    def attack(text: str) -> str:
+        glyph = homoglyph_text(text, 0.2, text_rng(0, "homoglyph", text))
+        return zero_width_text(glyph, 0.2, text_rng(0, "zero_width", text))
+
+    train, test = corpus
+    model, _ = fitted
+    clean = test["text"].tolist()
+    attacked = [attack(t) for t in clean]
+    assert attacked != clean
+    np.testing.assert_allclose(model.predict_proba(attacked), model.predict_proba(clean),
+                               atol=1e-6)
+
+    # fit() trains on the normalised texts, chunks included.
+    seen = {}
+    chunked = make(tokenizer, chunk_augment=2, chunk_words=8, epochs=1)
+    original = chunked._train
+
+    def spy(all_texts, y, feats, train_idx, eval_idx):
+        seen["texts"] = all_texts
+        return original(all_texts, y, feats, train_idx, eval_idx)
+
+    monkeypatch.setattr(chunked, "_train", spy)
+    texts = train["text"].tolist()
+    chunked.fit([attack(t) for t in texts], train["label"].tolist())
+    assert seen["texts"][:len(texts)] == texts
+    assert len(seen["texts"]) > len(texts) and all(t.isascii() for t in seen["texts"])
+
+
 def test_chunk_training_options_are_validated() -> None:
     with pytest.raises(ValueError):
         TransformerModel(chunk_augment=-1)

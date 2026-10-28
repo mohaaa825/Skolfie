@@ -6,8 +6,10 @@ Gradio web UI for the skolfie AI-vs-human text detector.
 Tabs:
     1. Detector             paste text or upload .txt/.docx/.pdf, see the
                             label, AI probability, confidence and the top
-                            contributing features, then leave feedback
-                            (thumbs, corrected label, comment)
+                            contributing features (plus a warning when the
+                            text hides invisible characters or look-alike
+                            letters), then leave feedback (thumbs,
+                            corrected label, comment)
     2. Feedback & Dataset   browse and export collected feedback, or add
                             labeled examples by hand
     3. Model                which model file is loaded, reload it
@@ -45,6 +47,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from skolfie.data import feedback as feedback_store
 from skolfie.data.file_parsers import MAX_FILE_BYTES, FileParseError, extract_text_from_file
+from skolfie.robust.normalize import obfuscation_note
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +150,9 @@ def format_result(result: Dict[str, Any]) -> str:
         f"| ML ensemble | {result.get('ml_ai_probability', float('nan')):.1%} |",
         f"| Burrows' Delta | {result.get('burrows_ai_probability', float('nan')):.1%} |",
     ]
+    obfuscation = result.get("obfuscation") or {}
+    if obfuscation.get("invisible") or obfuscation.get("lookalikes"):
+        lines += ["", f"**Warning:** {obfuscation_note(obfuscation)}"]
     top_words = result.get("burrows_top_words") or []
     if top_words:
         words = ", ".join(f"`{w}`" for w, _ in top_words)
