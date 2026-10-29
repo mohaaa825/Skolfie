@@ -208,12 +208,12 @@ def test_baselines_and_stack_score_attacked_text_like_the_original(corpus, tmp_p
 
 
 def test_app_shows_the_obfuscation_warning() -> None:
-    from skolfie.app.gradio_app import format_result
+    from skolfie.app.gradio_app import render_result_html
+    from skolfie.robust.normalize import obfuscation_note
 
-    result = {"label": "AI-Generated", "ai_probability": 0.9, "human_probability": 0.1,
-              "confidence": "High", "obfuscation": {"invisible": 0, "lookalikes": 0}}
-    assert "Warning" not in format_result(result)
-    assert "Warning" not in format_result({k: v for k, v in result.items()
-                                           if k != "obfuscation"})
-    result["obfuscation"] = {"invisible": 4, "lookalikes": 0}
-    assert "**Warning:** The text contains 4 invisible characters" in format_result(result)
+    result = {"label": "ai", "headline": "Likely AI-generated", "p_ai": 0.9, "warnings": []}
+    assert "Hidden characters" not in render_result_html(result, "some text")
+    note = obfuscation_note({"invisible": 4, "lookalikes": 0})
+    result["warnings"] = [{"kind": "obfuscation", "message": note}]
+    page = render_result_html(result, "some text")
+    assert "Hidden characters" in page and "The text contains 4 invisible characters" in page
