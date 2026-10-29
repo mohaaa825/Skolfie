@@ -25,6 +25,19 @@ Every output file is written atomically (`atomic_path`: temporary file,
 then rename), so an interrupted run never leaves a truncated report or
 predictions file for `--compare` or `scripts/stack.py` to read.
 
+Oversampling (`oversample={"fresh": 6}`, `evaluate.py --oversample fresh=6`):
+the train rows of a source are repeated that many times (whole copies, after
+`max_train` sampling), so a few hundred texts from current models are not
+drowned out by 176k older ones. It works for every scorer, since it only
+changes the (texts, labels) passed to `fit()`, and a transformer-chunks model
+cuts a different random chunk from each copy. Copies are of training texts
+only, so no evaluation split is affected; but a scorer's *own* internal
+hold-outs (LightGBM's early-stopping rows, the transformer's eval rows, the
+Delta out-of-fold folds) can now hold a copy of a text that is also trained
+on, which makes those internal numbers, and the number of trees or the
+checkpoint they pick, slightly optimistic. The stacker (`scripts/stack.py`)
+is not oversampled: it calibrates on `val` as it is.
+
 A report may also carry `verdicts` (cut-offs and the share of Human /
 Uncertain / AI verdicts per split, added by `scripts/stack.py`); it is
 rendered when present.
@@ -162,6 +175,39 @@ def _text_key(text: Any) -> bytes:
     return normalized_hash(text if isinstance(text, str) else "")
 
 
+def oversample_rows(df: pd.DataFrame, factors: dict[str, int] | None,
+                    column: str = "source") -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Repeat the rows whose `column` value is in `factors` that many times in all.
+
+    Returns (frame with the extra copies appended, info). A factor must be an
+    integer >= 1 (1 changes nothing); a value with no rows in `df` is an
+    error, since a typo would otherwise silently train the old model.
+    """
+    if not factors:
+        return df, {}
+    if column not in df.columns:
+        raise ValueError(f"cannot oversample: the corpus has no {column!r} column")
+    present = df[column].astype(str)
+    info: dict[str, Any] = {"column": column, "factors": {}, "rows": {}, "n_added": 0}
+    parts = [df]
+    for value, factor in sorted(factors.items()):
+        if isinstance(factor, bool) or not isinstance(factor, (int, np.integer)) or factor < 1:
+            raise ValueError(f"oversample factor for {value!r} must be an integer >= 1, "
+                             f"got {factor!r}")
+        rows = df[present == value]
+        if rows.empty:
+            seen = ", ".join(sorted(present.unique())) or "(none)"
+            raise ValueError(f"cannot oversample {column} {value!r}: no train rows have it "
+                             f"(train has: {seen})")
+        info["factors"][value] = int(factor)
+        info["rows"][value] = int(len(rows))
+        if factor > 1:
+            parts += [rows] * (int(factor) - 1)
+            info["n_added"] += int(len(rows)) * (int(factor) - 1)
+    out = pd.concat(parts) if len(parts) > 1 else df
+    return out, info
+
+
 def _filter_extra_train(extra: pd.DataFrame, corpus: pd.DataFrame, splits: pd.DataFrame,
                         log: Any) -> tuple[pd.DataFrame, dict]:
     """Drop extra train rows that overlap any non-train split; summarise the rest.
@@ -209,6 +255,7 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
                    max_train: int | None = None, max_eval: int | None = None,
                    seed: int = 0, eval_splits: Sequence[str] = EVAL_SPLITS,
                    extra_train: pd.DataFrame | None = None,
+                   oversample: dict[str, int] | None = None,
                    log: Any = print) -> tuple[dict[str, Any], pd.DataFrame]:
     """Fit on `train`, score every eval split. Returns (report dict, predictions frame).
 
@@ -216,6 +263,9 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
     is appended to the train texts after sampling, e.g. attacked copies for
     adversarial training. Rows whose text, or `orig_id`, is in any non-train
     split are dropped first (see `_filter_extra_train`).
+
+    `oversample` ({source: factor}) repeats the sampled train rows of those
+    sources (see `oversample_rows` and the module docstring).
     """
     started = time.time()
     manifest = splits_manifest or {}
@@ -238,7 +288,14 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
             raise ValueError("the train split needs both human and ai texts")
         log(f"[fit] {scorer.name} on {len(train_df)} train texts "
             f"({int(y.sum())} ai / {len(y) - int(y.sum())} human)")
-        texts, labels = train_df["text"].tolist(), train_df["label"].tolist()
+        fit_df, over_info = oversample_rows(train_df, oversample)
+        if over_info:
+            train_info["oversample"] = over_info
+            log(f"[fit] oversampling: + {over_info['n_added']} copies ("
+                + ", ".join(f"{k} {n} rows x{over_info['factors'][k]}"
+                            for k, n in over_info["rows"].items()) + ")")
+        texts, labels = fit_df["text"].tolist(), fit_df["label"].tolist()
+        del fit_df
         if extra_train is not None:
             extra, train_info["extra_train"] = _filter_extra_train(
                 extra_train, corpus, splits, log)
@@ -302,7 +359,8 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
         "splits": {"path": None if splits_path is None else os.fspath(splits_path),
                    "splits_version": manifest.get("splits_version"),
                    "corpus_version": manifest.get("corpus_version")},
-        "sampling": {"seed": seed, "max_train": max_train, "max_eval": max_eval},
+        "sampling": {"seed": seed, "max_train": max_train, "max_eval": max_eval,
+                     **({"oversample": dict(oversample)} if oversample else {})},
         "train": train_info,
         "results": results,
         "git": git_info(),
@@ -410,6 +468,12 @@ def render_report_md(report: dict[str, Any]) -> str:
         if extra:
             train_line += (f"; plus {extra['n']:,} extra texts ({extra['n_ai']:,} ai / "
                            f"{extra['n_human']:,} human, e.g. attacked copies) from --extra-train")
+        over = train.get("oversample")
+        if over:
+            train_line += ("; oversampled by " + over.get("column", "source") + ": "
+                           + ", ".join(f"{k} {n:,} x{over['factors'][k]}"
+                                       for k, n in over["rows"].items())
+                           + f" (+{over['n_added']:,} copies)")
     lines = [
         f"# Report card: {model['name']}",
         "",

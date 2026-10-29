@@ -245,6 +245,7 @@ def _load_source(
     max_words: int,
     seen_ids: set[str],
     stats: dict[str, Any],
+    options: Mapping[str, Any] | None = None,
 ) -> tuple[pa.Table, list[bytes]]:
     """Read, validate, clean and length-filter one source into an Arrow table.
 
@@ -258,7 +259,7 @@ def _load_source(
     hashes: list[bytes] = []
     local_ids: set[str] = set()
     counts = Counter()
-    for item in module.load(raw_dir, download=download):
+    for item in module.load(raw_dir, download=download, **(options or {})):
         counts["raw"] += 1
         try:
             rec = _coerce_record(item)
@@ -383,6 +384,7 @@ def build_corpus(
     balance: str = "none",
     strict: bool = False,
     registry: Mapping[str, Any] | None = None,
+    source_options: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> CorpusResult:
     """Build `out_dir/corpus.parquet`, `manifest.json` and `stats.md`.
 
@@ -391,6 +393,10 @@ def build_corpus(
     output is discarded) and the build continues, unless `strict=True`, in
     which case `SourceError` is raised. If no record survives,
     `EmptyCorpusError` is raised and no file is written.
+
+    `source_options` maps a source name to extra keyword arguments for its
+    `load()` (e.g. `{"persuade": {"max_essays": 4000}}`); they are recorded
+    in the manifest. Options for a source that is not built are an error.
     """
     if balance not in BALANCE_MODES:
         raise ValueError(f"balance must be one of {BALANCE_MODES}, got {balance!r}")
@@ -403,6 +409,10 @@ def build_corpus(
         raise KeyError(f"unknown source(s) {unknown}; registered: {sorted(registry)}")
     if not names:
         raise ValueError("no sources given")
+    source_options = {k: dict(v) for k, v in (source_options or {}).items()}
+    stray = sorted(set(source_options) - set(names))
+    if stray:
+        raise ValueError(f"source_options for source(s) not being built: {stray}")
 
     raw_dir = Path(raw_dir)
     out_dir = Path(out_dir)
@@ -422,6 +432,7 @@ def build_corpus(
             table, table_hashes = _load_source(
                 name, module, raw_dir, download=download, min_words=min_words,
                 max_words=max_words, seen_ids=seen_ids, stats=stats,
+                options=source_options.get(name),
             )
         except Exception as exc:  # any loader failure is reported, not fatal
             hint = source_hint(module)
@@ -548,6 +559,7 @@ def build_corpus(
                 "seed": seed,
                 "balance": balance,
                 "strict": strict,
+                "source_options": source_options,
                 "dedupe": "exact (normalised: case-folded, punctuation/whitespace removed)",
                 "near_dedupe": False,
             },

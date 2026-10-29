@@ -31,6 +31,15 @@ Every corpus row has exactly one *primary* split (`PRIMARY_SPLITS`), which
    question whose held-out-model answer is in `test_ood_generator` is never
    trained on. Only a new row that brings a held-out generator/domain into
    an existing group can therefore move that group's other rows (to test).
+   Exception to the exception, `shared_topic_groups`: a held-out-generator
+   AI row whose group key starts with one of these prefixes is *detached*
+   from its group (it becomes a group of its own) instead of pulling the
+   group into `test`. Meant for topics that human texts in train share,
+   such as the 15 PERSUADE assignments ("fresh:persuade-"): there a topic is
+   no label shortcut, so seeing other models' essays on it in train does not
+   flatter the unseen model, and tainting would empty train of most essays
+   by the models that are not held out. The detached row itself is still
+   never trained on (guarantee 3 below).
 
 Two splits are *extra* memberships on top of the primary one, which is why the
 file is a long (id, split) table rather than one split per id:
@@ -50,7 +59,10 @@ Groups (`group_key`): texts that must stay on the same side of the split.
   every answer (human and ChatGPT) to one question.
 - fresh `fresh:<generator>:<template>.<slots>.<style>.w<N>.t<T>:<i>` ->
   `fresh:<template>.<slots>`: one filled topic, across generators, styles,
-  lengths, temperatures and samples.
+  lengths, temperatures and samples. Student essays
+  (`skolfie.data.generation.student`) have ids
+  `fresh:<generator>:persuade-<prompt>.<grade>.<style>.w<N>.t<T>.n<i>:<i>`,
+  grouped as `fresh:persuade-<prompt>.<grade>`.
 - m4gt, autextification: the id itself. Their loaders expose no pairing
   between a human text and the generations made from it (M4GT's
   `parallel` field is not loaded; AuTexTification subtask 1 releases none).
@@ -59,7 +71,8 @@ Guarantees, checked by `check_guarantees` on every `build_memberships` call
 (it raises `SplitLeakError`, an `AssertionError`, also under `python -O`):
 
 - no id is both in train and in val or any test split;
-- no group is in more than one of train / val / test-side (test-side is
+- no group is in more than one of train / val / test-side (rows detached by
+  `shared_topic_groups` count as groups of their own; test-side is
   `test` plus every `test_*` split);
 - no held-out-family AI text is in train or val;
 - no held-out-domain text is in train or val.
@@ -127,6 +140,9 @@ class SplitConfig:
     held_out_domains: list[str] = field(default_factory=list)
     short_text_max_words: int = 100
     generator_families: dict[str, str] = field(default_factory=dict)
+    #: Group-key prefixes whose held-out-generator rows are detached rather than
+    #: tainting their group (see the module docstring).
+    shared_topic_groups: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
@@ -141,7 +157,7 @@ class SplitConfig:
             raise ValueError(f"fractions must be >= 0, got {self.fractions}")
         if abs(sum(self.fractions.values()) - 1.0) > 1e-6:
             raise ValueError(f"fractions must sum to 1, got {self.fractions}")
-        for name in ("held_out_generators", "held_out_domains"):
+        for name in ("held_out_generators", "held_out_domains", "shared_topic_groups"):
             value = getattr(self, name)
             if isinstance(value, str) or not all(isinstance(v, str) for v in value):
                 raise ValueError(f"{name} must be a list of strings, got {value!r}")
@@ -161,7 +177,7 @@ class SplitConfig:
         return cls(**dict(data))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "seed": self.seed,
             "fractions": {k: self.fractions[k] for k in FRACTION_SPLITS},
             "held_out_generators": list(self.held_out_generators),
@@ -169,6 +185,10 @@ class SplitConfig:
             "short_text_max_words": self.short_text_max_words,
             "generator_families": dict(sorted(self.generator_families.items())),
         }
+        # Only when used, so configs without it keep their hash and splits_version.
+        if self.shared_topic_groups:
+            out["shared_topic_groups"] = list(self.shared_topic_groups)
+        return out
 
     def config_hash(self) -> str:
         """sha256 of the canonical JSON form (key order and list order of
@@ -176,6 +196,8 @@ class SplitConfig:
         d = self.to_dict()
         d["held_out_generators"] = sorted(set(d["held_out_generators"]))
         d["held_out_domains"] = sorted(set(d["held_out_domains"]))
+        if "shared_topic_groups" in d:
+            d["shared_topic_groups"] = sorted(set(d["shared_topic_groups"]))
         blob = json.dumps(d, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -227,6 +249,20 @@ def group_keys(ids: pd.Series, sources: pd.Series) -> pd.Series:
     return out
 
 
+def split_groups(df: pd.DataFrame, config: SplitConfig) -> pd.Series:
+    """The group key each row is split by: `group_keys`, except that held-out-
+    generator AI rows in a `shared_topic_groups` group get their own id."""
+    groups = group_keys(df["id"], df["source"])
+    if config.shared_topic_groups:
+        _, ood_gen = _held_out_masks(df, config)
+        shared = groups.str.startswith(tuple(config.shared_topic_groups)).to_numpy()
+        detach = ood_gen & shared
+        if detach.any():
+            groups = groups.copy()
+            groups[detach] = df["id"].astype(str)[detach]
+    return groups
+
+
 def _unit_hash(keys: Sequence[str], seed: int) -> np.ndarray:
     """A float in [0, 1) per key from blake2b(seed, key): stable everywhere."""
     prefix = f"{seed}\x1f".encode()
@@ -276,7 +312,7 @@ def assign_splits(df: pd.DataFrame, config: SplitConfig) -> pd.Series:
     group (not on row order or the rest of the corpus), see the module docstring.
     """
     _check_frame(df)
-    groups = group_keys(df["id"], df["source"])
+    groups = split_groups(df, config)
     codes, uniques = pd.factorize(groups, sort=False)
     ood_domain, ood_gen = _held_out_masks(df, config)
 
@@ -397,7 +433,7 @@ def check_guarantees(df: pd.DataFrame, memberships: pd.DataFrame, config: SplitC
         )
 
     # 2. no group on more than one side (train / val / test-side)
-    gcodes, guniq = pd.factorize(group_keys(df["id"], df["source"]))
+    gcodes, guniq = pd.factorize(split_groups(df, config))
     n_sides = np.zeros(len(guniq), dtype=np.int64)
     for side in (in_train, in_val, in_test_side):
         hit = np.zeros(len(guniq), dtype=bool)
@@ -641,6 +677,11 @@ def render_summary(manifest: Mapping[str, Any]) -> str:
         "- test_ood_generator human texts: the `test` human rows from "
         f"{', '.join(manifest['ood_generator_human_domains']) or '(no domain)'} "
         "(also members of `test`)",
+    ]
+    if cfg.get("shared_topic_groups"):
+        out.append("- shared-topic groups (held-out-generator rows detached, not tainting): "
+                   + ", ".join(f"`{g}`" for g in cfg["shared_topic_groups"]))
+    out += [
         "",
         "## Split sizes",
         "",

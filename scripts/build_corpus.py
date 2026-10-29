@@ -14,6 +14,10 @@ Examples:
     # Stop on the first source that fails instead of skipping it
     python scripts/build_corpus.py --strict
 
+    # Modern data: PERSUADE student essays (capped at 4,000) + generated essays
+    python scripts/build_corpus.py --sources hc3,m4gt,autextification,persuade,fresh \\
+        --persuade-max-essays 4000 --out-dir data/processed_modern
+
 Writes data/processed/corpus.parquet, manifest.json and stats.md (see
 skolfie/data/corpus.py) and prints the stats table. A source that fails is
 reported with its error and skipped unless --strict. The exit code is 1 when
@@ -64,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="never download; use only files already in --raw-dir")
     parser.add_argument("--strict", action="store_true",
                         help="abort if any source fails instead of skipping it")
+    parser.add_argument("--persuade-max-essays", type=int, default=None, metavar="N",
+                        help="keep at most N PERSUADE essays, equally many per prompt "
+                             "(default: 4000; 0 keeps all 25k)")
     parser.add_argument("-q", "--quiet", action="store_true", help="only print errors and stats")
     return parser
 
@@ -103,6 +110,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             f"registered: {', '.join(sorted(registry)) or '(none)'}"
         )
 
+    source_options = {}
+    if args.persuade_max_essays is not None:
+        if args.persuade_max_essays < 0:
+            parser.error("--persuade-max-essays must be >= 0 (0 keeps all)")
+        if "persuade" in names:
+            source_options["persuade"] = {"max_essays": args.persuade_max_essays,
+                                          "seed": args.seed}
+        else:
+            print("warning: --persuade-max-essays ignored: persuade is not in --sources",
+                  file=sys.stderr)
+    elif "persuade" in names:
+        source_options["persuade"] = {"seed": args.seed}
+
     try:
         result = corpus.build_corpus(
             names,
@@ -115,6 +135,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             balance=args.balance,
             strict=args.strict,
             registry=registry,
+            source_options=source_options,
         )
     except corpus.SourceError as exc:
         print(f"error: {exc}", file=sys.stderr)
