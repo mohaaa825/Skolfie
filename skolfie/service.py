@@ -362,7 +362,9 @@ def _read_json(path: Path, what: str) -> Any:
 
 def _limitations(data: Any, path: Path) -> list[dict[str, Any]]:
     if isinstance(data, dict):
-        data = data.get("known_limitations", data.get("items"))
+        # scripts/eval_fairness.py writes {"model": ..., "limitations": [...]}.
+        data = next((data[k] for k in ("limitations", "known_limitations", "items")
+                     if k in data), None)
     if not isinstance(data, list):
         raise ValueError(f"known limitations {path} must hold a list of items")
     return [item for item in data

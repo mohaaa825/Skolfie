@@ -160,7 +160,8 @@ def make_colab_dirs(root: Path, *, chunks: bool = True, reports: bool = True) ->
             {f: {"median": 0.1, "human": 0.0, "ai": 0.3} for f in FEATURES}))
         (rep / "fairness" / "stacked").mkdir(parents=True)
         (rep / "fairness" / "stacked" / "known_limitations.json").write_text(
-            json.dumps(LIMITATIONS))
+            json.dumps({"model": "stacked", "threshold": 0.7,  # eval_fairness.py's shape
+                        "limitations": LIMITATIONS}))
     return {"root": root, "models": models, "reports": rep}
 
 
@@ -400,3 +401,14 @@ def test_constants() -> None:
     assert service.MIN_TEXT_WORDS < service.SHORT_TEXT_WORDS
     assert set(service.HEADLINES) == set(service.LABELS)
     assert "sole basis" in DISCLAIMER
+
+
+@pytest.mark.parametrize("data", [
+    {"model": "stacked", "limitations": [{"message": "m1"}, {"message": " "}]},
+    {"known_limitations": [{"message": "m1"}]},
+    [{"message": "m1"}, {"no": "message"}],
+])
+def test_known_limitations_file_shapes(data) -> None:
+    assert [i["message"] for i in service._limitations(data, Path("k.json"))] == ["m1"]
+    with pytest.raises(ValueError, match="list of items"):
+        service._limitations({"model": "stacked"}, Path("k.json"))
