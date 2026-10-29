@@ -11,6 +11,10 @@ Roadmap step 11: the `skolfie` command (also `python -m skolfie`).
     skolfie bundle              copy the models and reports into one portable
                                 folder (`skolfie.service.make_bundle`)
     skolfie info                what the detector loaded, as JSON
+    skolfie space build         write a Hugging Face Space folder for a bundle
+                                (`skolfie.deploy.hf_space.build_space`)
+    skolfie space publish       upload it as a Space; the token comes from
+                                $HF_TOKEN, the app login from $SKOLFIE_APP_AUTH
 
 The models come from `--bundle DIR`, or `--models-dir DIR [--reports-dir
 DIR]`, else from the environment variables SKOLFIE_BUNDLE, or
@@ -40,6 +44,8 @@ STDIN = "-"
 ENV_BUNDLE = "SKOLFIE_BUNDLE"
 ENV_MODELS_DIR = "SKOLFIE_MODELS_DIR"
 ENV_REPORTS_DIR = "SKOLFIE_REPORTS_DIR"
+ENV_HF_TOKEN = "HF_TOKEN"
+ENV_APP_AUTH = "SKOLFIE_APP_AUTH"
 CSV_COLUMNS = ("file", "words", "label", "ai_likelihood_pct", "warnings", "warning_kinds",
                "headline", "error")
 BATCH_SIZE = 16
@@ -98,6 +104,39 @@ def build_parser() -> argparse.ArgumentParser:
 
     info = sub.add_parser("info", help="Show what the detector loads, as JSON.")
     _add_model_args(info)
+
+    space = sub.add_parser(
+        "space", help="Put the web app on Hugging Face Spaces.",
+        description="Build a Hugging Face Space folder for the models, then publish it.")
+    space_sub = space.add_subparsers(dest="space_command", metavar="ACTION")
+    space_sub.required = True
+    build = space_sub.add_parser(
+        "build", help="Write a ready-to-upload Space folder.",
+        description="Write a Space folder (README.md, requirements.txt, app.py, bundle/) "
+                    "pinned to the library versions installed here. Run it where the models "
+                    "were trained, so the pickled models load on the Space.")
+    _add_model_args(build)
+    build.add_argument("--out", type=Path, required=True, metavar="DIR",
+                       help="The Space folder to write (new, or made by an earlier build).")
+    build.add_argument("--git-ref", required=True, metavar="REF",
+                       help="Skolfie commit (or tag) the Space installs; it must be on GitHub.")
+    build.add_argument("--repo-url", default=None, metavar="URL",
+                       help="Skolfie's Git repository (default: the GitHub repository).")
+    build.add_argument("--title", default="Skolfie", help="The Space's title.")
+    build.add_argument("--public", action="store_true",
+                       help="serve the site WITHOUT a login (anyone with the address can use it)")
+    publish = space_sub.add_parser(
+        "publish", help="Upload a Space folder to Hugging Face.",
+        description=f"Create the Space if needed, set its {ENV_APP_AUTH} secret from "
+                    f"${ENV_APP_AUTH} (user:password) when set, and upload the folder. The "
+                    f"token (Write role) is read from ${ENV_HF_TOKEN}.")
+    publish.add_argument("--dir", type=Path, required=True, metavar="DIR",
+                         help="A folder made by `skolfie space build`.")
+    publish.add_argument("--repo-id", required=True, metavar="USER/NAME",
+                         help="The Space, e.g. yourname/skolfie.")
+    publish.add_argument("--private", action="store_true",
+                         help="create the Space as private (only your Hugging Face account "
+                              "can open it)")
     return parser
 
 
@@ -366,6 +405,58 @@ def cmd_info(args: argparse.Namespace, stdout: TextIO) -> int:
     return 0
 
 
+def cmd_space_build(args: argparse.Namespace, stdout: TextIO) -> int:
+    import tempfile
+
+    from skolfie.deploy.hf_space import DEFAULT_REPO_URL, build_space, collect_versions
+    from skolfie.service import make_bundle
+
+    if (args.bundle is None) == (args.models_dir is None):
+        raise UsageError("give --bundle DIR or --models-dir DIR (not both)")
+    if args.bundle is not None and args.reports_dir is not None:
+        raise UsageError("--reports-dir goes with --models-dir, not --bundle")
+    versions = collect_versions()
+    options = dict(repo_url=args.repo_url or DEFAULT_REPO_URL, git_ref=args.git_ref,
+                   versions=versions, title=args.title, public=args.public)
+    try:
+        if args.bundle is not None:
+            out = build_space(args.bundle, args.out, **options)
+        else:
+            with tempfile.TemporaryDirectory(prefix="skolfie-bundle-") as tmp:
+                make_bundle(args.models_dir, args.reports_dir, tmp)
+                out = build_space(tmp, args.out, **options)
+    except (FileNotFoundError, ValueError) as exc:
+        raise UsageError(str(exc)) from exc
+    pins = ", ".join(f"{k} {v}" for k, v in versions.items())
+    print(f"Space folder written to {out}\n  pinned: {pins}", file=stdout)
+    if args.public:
+        print("  --public: the site will NOT ask for a login.", file=stdout)
+    return 0
+
+
+def cmd_space_publish(args: argparse.Namespace, stdout: TextIO, stderr: TextIO,
+                      environ: Optional[dict[str, str]] = None) -> int:
+    from skolfie.deploy.hf_space import publish_space, space_site_url
+
+    env = os.environ if environ is None else environ
+    token = (env.get(ENV_HF_TOKEN) or "").strip()
+    if not token:
+        raise UsageError(f"${ENV_HF_TOKEN} is not set: create a token with the Write role at "
+                         f"https://huggingface.co/settings/tokens and run "
+                         f"`export {ENV_HF_TOKEN}=...` (it is never printed or saved)")
+    auth = env.get(ENV_APP_AUTH) or None
+    try:
+        page = publish_space(args.dir, args.repo_id, token, private=args.private, auth=auth)
+    except (ValueError, ImportError) as exc:
+        raise UsageError(str(exc)) from exc
+    if auth is None:
+        print(f"[skolfie] ${ENV_APP_AUTH} is not set: the Space's login secret was left as "
+              "it was.", file=stderr)
+    print(f"Published. Build logs: {page}\nWebsite: {space_site_url(args.repo_id)} "
+          "(ready once the build finishes, usually 5-10 minutes the first time)", file=stdout)
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None, *, stdin: Optional[TextIO] = None,
          stdout: Optional[TextIO] = None, stderr: Optional[TextIO] = None) -> int:
     stdin = sys.stdin if stdin is None else stdin
@@ -381,9 +472,14 @@ def main(argv: Optional[Sequence[str]] = None, *, stdin: Optional[TextIO] = None
             return cmd_check(args, stdin, stdout, stderr)
         if args.command == "bundle":
             return cmd_bundle(args, stdout)
+        if args.command == "space":
+            if args.space_command == "build":
+                return cmd_space_build(args, stdout)
+            return cmd_space_publish(args, stdout, stderr)
         return cmd_info(args, stdout)
     except UsageError as exc:
-        print(f"skolfie {args.command}: error: {exc}", file=stderr)
+        command = args.command + (f" {args.space_command}" if args.command == "space" else "")
+        print(f"skolfie {command}: error: {exc}", file=stderr)
         return 2
 
 
