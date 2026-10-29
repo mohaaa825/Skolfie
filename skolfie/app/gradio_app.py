@@ -255,6 +255,8 @@ a {{ color: var(--sk-sky-700); }}
   gap: 8px; }}
 #sk-composer:focus-within {{ border-color: var(--sk-sky-300);
   box-shadow: 0 0 0 3px var(--sk-sky-100), var(--sk-shadow); }}
+#sk-composer .block, #sk-composer label, #sk-composer .input-container {{
+  border: none !important; box-shadow: none !important; outline: none !important; }}
 #sk-composer textarea {{ border: none !important; box-shadow: none !important;
   background: transparent !important; font-size: 1rem; line-height: 1.6; padding: 6px 8px;
   color: var(--sk-text); resize: vertical; }}
@@ -359,6 +361,10 @@ a {{ color: var(--sk-sky-700); }}
   margin: 0 0 8px; line-height: 1.5; }}
 .sk-footer a:hover {{ color: var(--sk-sky-700); }}
 @media (max-width: 640px) {{
+  .gradio-container {{ width: 100% !important; min-width: 0 !important;
+    box-sizing: border-box; }}
+  .sk-composer-bar .sk-attach-note {{ display: none !important; }}
+  .sk-topbar .sk-pill-link {{ display: none; }}
   .sk-footer {{ grid-template-columns: 1fr 1fr; }}
   .sk-hero {{ padding-top: 32px; }}
   .sk-card, .sk-how {{ padding: 18px; }}
