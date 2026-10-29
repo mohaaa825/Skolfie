@@ -36,20 +36,29 @@ Metrics
 
 `highlight()` merges neighbouring chunks with the same label into spans for
 the UI.
+
+`read_mixed_report()` reads the tuned chunk rule and chunk size back from the
+mixed_report.json that scripts/eval_mixed.py writes; `chunk_rule_from_params()`
+turns the rule's params into a `ChunkRule`.
 """
 
 from __future__ import annotations
 
 import itertools
+import json
 import math
+import os
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from typing import Any, Callable, Sequence
 
 import numpy as np
 
 LABELS3 = ("human", "ai", "mixed")
 AI_THRESHOLD = 0.5
+# Chunk size in words when a mixed report does not give one (chunk_spans' defaults).
+DEFAULT_TARGET_WORDS = 60
+DEFAULT_MIN_WORDS = 25
 
 Span = tuple[int, int]
 Chunker = Callable[[str], Sequence[Span]]
@@ -177,6 +186,46 @@ class ChunkRule:
 
     def predict(self, scored: Sequence[dict]) -> np.ndarray:
         return self._predict_stats(_chunk_stats(scored))
+
+
+def chunk_rule_from_params(params: dict[str, Any]) -> ChunkRule:
+    """A ChunkRule from saved params (unknown keys ignored); ValueError unless lo < hi."""
+    known = {f.name for f in fields(ChunkRule)}
+    rule = ChunkRule(**{k: v for k, v in dict(params).items() if k in known})
+    if not rule.lo < rule.hi:
+        raise ValueError(f"chunk rule lo must be below hi, got {dict(params)}")
+    return rule
+
+
+def read_mixed_report(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """
+    {"rule": ChunkRule params, "target_words": int | None, "min_words": int | None}
+    from a mixed_report.json (its rules.chunk.params and chunking).
+
+    FileNotFoundError when the file is missing; ValueError when it is not valid
+    JSON or has no rules.chunk.params.
+    """
+    path = os.fspath(path)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"mixed report not found: {path}")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            report = json.load(fh)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path} is not valid JSON ({exc}); rerun eval_mixed.py") from exc
+    try:
+        params = dict(report["rules"]["chunk"]["params"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"{path} has no rules.chunk.params") from exc
+    chunking = report.get("chunking")
+    chunking = chunking if isinstance(chunking, dict) else {}
+
+    def words(key: str) -> int | None:
+        value = chunking.get(key)
+        return int(value) if value else None
+
+    return {"rule": params, "target_words": words("target_words"),
+            "min_words": words("min_words")}
 
 
 @dataclass

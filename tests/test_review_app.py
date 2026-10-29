@@ -128,68 +128,70 @@ def test_unsupported_extension_is_still_a_value_error(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 # Gradio app helpers
 # --------------------------------------------------------------------------- #
-class _FakeModel:
+class _FakeDetector:
     def __init__(self, fail: bool = False) -> None:
         self.calls = 0
         self.fail = fail
 
-    def predict(self, text: str) -> dict:
+    def check(self, text: str) -> dict:
         self.calls += 1
         if self.fail:
             raise RuntimeError("secret internal /srv/path detail")
-        return {"label": "AI-Generated", "ai_probability": 0.8, "human_probability": 0.2,
-                "confidence": "Medium", "top_features": [], "raw_features": {}}
+        return {"label": "ai", "headline": "Likely AI-generated", "p_ai": 0.8,
+                "n_words": len(text.split()), "top_features": [], "reasons": [], "notes": [],
+                "warnings": [], "disclaimer": "d"}
 
 
-def _holder(model: _FakeModel) -> gradio_app.ModelHolder:
-    holder = gradio_app.ModelHolder(path=Path("unused.joblib"))
-    holder.model = model
+def _holder(detector: _FakeDetector) -> gradio_app.DetectorHolder:
+    holder = gradio_app.DetectorHolder(source=gradio_app.ModelSource(models_dir=Path("unused")))
+    holder.detector = detector
     return holder
 
 
-def test_analyze_rejects_overlong_text_before_model() -> None:
-    model = _FakeModel()
-    md, probs, rows, state = gradio_app.analyze(
-        _holder(model), "word " * (gradio_app.MAX_TEXT_CHARS // 5 + 1), None)
-    assert "too long" in md and state is None and model.calls == 0
+def test_check_rejects_overlong_text_before_model() -> None:
+    detector = _FakeDetector()
+    out, state = gradio_app.check_text(
+        _holder(detector), "word " * (gradio_app.MAX_TEXT_CHARS // 5 + 1), None)
+    assert "too long" in out and state is None and detector.calls == 0
 
 
-def test_analyze_file_errors_hide_paths(tmp_path: Path) -> None:
+def test_check_file_errors_hide_paths(tmp_path: Path) -> None:
     pytest.importorskip("docx")
     bad = tmp_path / "upload.docx"
     bad.write_bytes(b"not a zip")
-    md, _, _, state = gradio_app.analyze(_holder(_FakeModel()), "", str(bad))
-    assert "Could not read the file" in md and state is None
-    assert str(tmp_path) not in md
+    out, state = gradio_app.check_text(_holder(_FakeDetector()), "", str(bad))
+    assert "Could not read the file" in out and state is None
+    assert str(tmp_path) not in out
 
 
-def test_analyze_unexpected_read_error_is_generic(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_check_unexpected_read_error_is_generic(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args):
         raise OSError("/very/secret/path is gone")
 
     monkeypatch.setattr(gradio_app, "extract_text_from_file", boom)
-    md, *_ = gradio_app.analyze(_holder(_FakeModel()), "", "/x/upload.txt")
-    assert "secret" not in md and "Could not read the file" in md
+    out, _ = gradio_app.check_text(_holder(_FakeDetector()), "", "/x/upload.txt")
+    assert "secret" not in out and "Could not read the file" in out
 
 
-def test_analyze_escapes_markdown_in_error(tmp_path: Path) -> None:
-    path = tmp_path / "x.[a](http:evil)"
+def test_check_escapes_html_in_error(tmp_path: Path) -> None:
+    path = tmp_path / "x.<img src=x onerror=alert(1)>"
     path.write_text("hello")
-    md, *_ = gradio_app.analyze(_holder(_FakeModel()), "", str(path))
-    assert "[a](http:evil)" not in md
+    out, _ = gradio_app.check_text(_holder(_FakeDetector()), "", str(path))
+    assert "<img" not in out and "&lt;img" in out
 
 
-def test_analyze_prediction_error_is_generic() -> None:
-    md, probs, rows, state = gradio_app.analyze(
-        _holder(_FakeModel(fail=True)), "one two three four five six", None)
-    assert "could not analyze" in md and "secret" not in md and state is None
+def test_check_prediction_error_is_generic() -> None:
+    out, state = gradio_app.check_text(
+        _holder(_FakeDetector(fail=True)), "one two three four five six", None)
+    assert "could not check" in out and "secret" not in out and state is None
 
 
 def test_submit_feedback_validates_choices(tmp_path: Path) -> None:
     csv_path = tmp_path / "fb.csv"
-    state = {"text": "t", "label": "AI-Generated", "confidence": "High", "ai_probability": 0.9}
-    assert "up or down" in gradio_app.submit_feedback(state, "sideways", None, "", csv_path)
-    assert "valid" in gradio_app.submit_feedback(state, None, "ai", "", csv_path)
+    state = {"text": "t", "label": "ai", "p_ai": 0.9}
+    assert "looks right or looks wrong" in gradio_app.submit_feedback(
+        state, "sideways", None, "", csv_path)
+    assert "valid" in gradio_app.submit_feedback(state, None, "robot", "", csv_path)
     long_comment = "x" * (gradio_app.MAX_COMMENT_CHARS + 1)
     assert "under" in gradio_app.submit_feedback(state, "up", None, long_comment, csv_path)
     assert not csv_path.exists()
@@ -200,7 +202,7 @@ def test_submit_feedback_validates_choices(tmp_path: Path) -> None:
 def test_manual_example_caps_text(tmp_path: Path) -> None:
     csv_path = tmp_path / "fb.csv"
     text = "x" * (gradio_app.MAX_TEXT_CHARS + 1)
-    assert "too long" in gradio_app.add_manual_example(text, "AI-Generated", "", csv_path)
+    assert "too long" in gradio_app.add_manual_example(text, "AI", "", csv_path)
     assert not csv_path.exists()
 
 
@@ -224,11 +226,14 @@ def test_main_defaults_are_local_only(monkeypatch: pytest.MonkeyPatch) -> None:
         def launch(self, **kwargs):
             launched.update(kwargs)
 
-    monkeypatch.delenv("GRADIO_SERVER_NAME", raising=False)
-    monkeypatch.setattr(gradio_app, "build_app", lambda: _App())
+    for name in ("GRADIO_SERVER_NAME", "SKOLFIE_APP_AUTH", "SKOLFIE_SHOW_FEEDBACK"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(gradio_app.DetectorHolder, "load", lambda self: "no models")
+    monkeypatch.setattr(gradio_app, "build_app", lambda holder, show_feedback: _App())
     gradio_app.main([])
     assert launched["server_name"] == "127.0.0.1"
     assert launched["share"] is False
+    assert launched["auth"] is None
     assert launched["max_file_size"] == gradio_app.MAX_FILE_BYTES
 
 

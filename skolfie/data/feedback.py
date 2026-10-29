@@ -8,6 +8,11 @@ Every piece of feedback given in the app (or manually added via the
 becomes a growing, real-world labeled dataset that can be used to retrain
 the model (see scripts/train.py).
 
+Corrected labels (`user_label`) use the vocabulary in `USER_LABELS`:
+"Human-Written", "AI-Generated" and "Mixed" (part human, part AI). The
+binary training script (scripts/train.py) only learns from the first two
+and skips Mixed rows; they are kept for evaluating the Mixed detector.
+
 The CSV holds user-supplied text verbatim, so it is the training source of
 truth. `export_feedback` writes the copy meant for spreadsheets: there,
 cells that Excel/Sheets would run as a formula (starting with = + - @) are
@@ -29,6 +34,12 @@ FEEDBACK_COLUMNS = [
     "user_label", "thumbs", "comment", "timestamp", "features",
 ]
 _STRING_COLUMNS = [c for c in FEEDBACK_COLUMNS if c != "ai_probability"]
+
+LABEL_HUMAN = "Human-Written"
+LABEL_AI = "AI-Generated"
+LABEL_MIXED = "Mixed"
+USER_LABELS = (LABEL_HUMAN, LABEL_AI, LABEL_MIXED)
+_IMPLIED_AI_PROBABILITY = {LABEL_AI: 1.0, LABEL_HUMAN: 0.0}
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 # Gradio runs handlers in worker threads: serialise header creation + appends.
@@ -75,7 +86,7 @@ def save_feedback(
     text: str,
     predicted_label: str,
     predicted_confidence: str,
-    ai_probability: float,
+    ai_probability: Optional[float],
     user_label: Optional[str] = None,
     thumbs: Optional[str] = None,
     comment: Optional[str] = None,
@@ -121,19 +132,25 @@ def load_feedback(csv_path: str) -> pd.DataFrame:
         return pd.DataFrame(columns=FEEDBACK_COLUMNS)
 
 
+def implied_ai_probability(label: Optional[str]) -> Optional[float]:
+    """1.0 for an AI label, 0.0 for a human one, None for Mixed (no single probability)."""
+    return _IMPLIED_AI_PROBABILITY.get(label or "")
+
+
 def add_manual_label(csv_path: str, text: str, label: str, comment: str = ""):
     """
     Manually add a labeled text straight into the dataset, bypassing the
     "analyze first" flow. Useful for bulk-curating training data from the
-    Feedback & Dataset tab.
+    Feedback & Dataset tab. `label` is one of `USER_LABELS`.
     """
-    implied_prob = 1.0 if label == "AI-Generated" else 0.0
+    if label not in USER_LABELS:
+        raise ValueError(f"label must be one of {', '.join(USER_LABELS)}")
     save_feedback(
         csv_path=csv_path,
         text=text,
         predicted_label="",
         predicted_confidence="",
-        ai_probability=implied_prob,
+        ai_probability=implied_ai_probability(label),
         user_label=label,
         thumbs="",
         comment=comment,

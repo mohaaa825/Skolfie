@@ -61,3 +61,49 @@ def test_manual_label_and_export(tmp_path: Path) -> None:
     assert len(exported) == 1
     assert exported.iloc[0]["user_label"] == "AI-Generated"
     assert float(exported.iloc[0]["ai_probability"]) == 1.0
+
+
+def test_mixed_label(tmp_path: Path) -> None:
+    import pytest
+
+    from skolfie.data.feedback import (
+        LABEL_AI,
+        LABEL_HUMAN,
+        LABEL_MIXED,
+        USER_LABELS,
+        implied_ai_probability,
+    )
+
+    assert USER_LABELS == (LABEL_HUMAN, LABEL_AI, LABEL_MIXED) == (
+        "Human-Written", "AI-Generated", "Mixed")
+    assert implied_ai_probability(LABEL_AI) == 1.0
+    assert implied_ai_probability(LABEL_HUMAN) == 0.0
+    assert implied_ai_probability(LABEL_MIXED) is None
+
+    csv_path = str(tmp_path / "feedback.csv")
+    add_manual_label(csv_path, "Half mine, half not.", LABEL_MIXED)
+    save_feedback(csv_path, "Checked text.", "mixed", "", None, user_label=LABEL_MIXED,
+                  thumbs="up")
+    df = load_feedback(csv_path)
+    assert df["user_label"].tolist() == [LABEL_MIXED, LABEL_MIXED]
+    assert df["ai_probability"].isna().all()
+    with pytest.raises(ValueError):
+        add_manual_label(csv_path, "x", "robot")
+
+
+def test_binary_training_skips_mixed_rows(tmp_path: Path) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "skolfie_train_script_fb", Path(__file__).resolve().parent.parent / "scripts" / "train.py")
+    train = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(train)
+
+    csv_path = str(tmp_path / "feedback.csv")
+    add_manual_label(csv_path, "Human text.", "Human-Written")
+    add_manual_label(csv_path, "Mixed text.", "Mixed")
+    save_feedback(csv_path, "Predicted mixed, thumbs up.", "mixed", "", 0.5, thumbs="up")
+    save_feedback(csv_path, "Predicted ai, thumbs up.", "ai", "", 0.9, thumbs="up")
+    texts, labels = train.load_feedback_data(csv_path)
+    assert list(zip(texts, labels)) == [("Human text.", "human"),
+                                        ("Predicted ai, thumbs up.", "ai")]

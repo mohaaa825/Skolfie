@@ -11,9 +11,10 @@ a Gradio app for analysing text, collecting feedback and retraining.
 
 - **No trained model ships with the repo.** You have to train one yourself
   (see below). `models/*.joblib` is git-ignored.
-- **The app still runs the old prototype model.** The new models are
-  measured with the held-out evaluation harness (see "Evaluate") but are not
-  wired into the app yet, so treat any score the app prints as uncalibrated.
+- **The app and CLI run the new models.** `python -m skolfie.app` and
+  `skolfie check` load the stacked verdict model, the feature model (for the
+  reasons) and the chunk-trained transformer (for Mixed and the highlights)
+  through `skolfie.service.Detector`.
 - **The seed texts are a test fixture, not a dataset.** The 25 human and
   25 AI texts in `tests/fixtures/seed_texts.py` are synthetic and
   deliberately clear-cut. They are useful for smoke tests (`--seed-demo`)
@@ -25,10 +26,13 @@ Done: (1) repo cleanup, (2) a 259k-text corpus from HC3, M4GT and
 AuTexTification, (3) held-out evaluation with length and TF-IDF baselines,
 (4) the feature model (style + GPT-2 + Delta features into LightGBM),
 (5) DistilBERT + features, (6) a calibrated combiner with Human /
-Uncertain / AI verdicts, (7) Mixed human/AI detection by chunks. Code
-done, runs pending: (8) explanations, (9) evasion tests, (10) fairness
-checks. Next: (11) API/CLI/web packaging, (12) retraining from
-feedback.
+Uncertain / AI verdicts, (7) Mixed human/AI detection by chunks, (8)
+explanations, (9) evasion tests, (10) fairness checks, (11) the web app
+and CLI. Next: (12) retraining from feedback. A REST API is left for when
+there is a system to integrate with; `Detector.check()` already returns
+JSON-ready results.
+
+The target use is student essays and other longer English texts.
 
 ## Install
 
@@ -313,11 +317,50 @@ By default the model is written to `models/detector_model.joblib`. Run
 ## Run the app
 
 ```bash
-python -m skolfie.app
+pip install -e ".[features,app]"
+python -m skolfie.app --models-dir /path/to/skolfie/models --reports-dir /path/to/skolfie/reports
+# or, with a folder made by `skolfie bundle`:
+python -m skolfie.app --bundle /path/to/bundle
 ```
 
-Then open the local URL that Gradio prints (usually `http://127.0.0.1:7860`).
-The app needs a trained model. Train one first.
+Then open the local URL that Gradio prints (usually `http://127.0.0.1:7860`). Paste an essay
+or upload a .txt/.docx/.pdf: the app shows the verdict (Human / AI / Mixed / Uncertain / Too
+short), the AI likelihood, the text with its AI-looking parts highlighted, the reasons, known
+fairness limitations and other warnings. Without models it says how to get them (train them
+with the notebooks, or on Colab just run `notebooks/app.ipynb`).
+
+| Option | Environment variable | |
+|---|---|---|
+| `--bundle DIR` | `SKOLFIE_BUNDLE` | bundle folder (`skolfie bundle`) |
+| `--models-dir DIR` | `SKOLFIE_MODELS_DIR` | models folder (default `./models`) |
+| `--reports-dir DIR` | `SKOLFIE_REPORTS_DIR` | reports folder (default: `reports/` next to the models) |
+| `--auth USER:PASSWORD` | `SKOLFIE_APP_AUTH` | require a login (prefer the variable) |
+| `--share`, `--host`, `--port` | `GRADIO_SERVER_NAME`, `GRADIO_SERVER_PORT` | where to serve (default `127.0.0.1:7860`, no share link) |
+| `--show-feedback` | `SKOLFIE_SHOW_FEEDBACK=1` | add the Feedback & Dataset panel (lists every stored text) |
+| | `SKOLFIE_FEEDBACK` | feedback CSV (default `feedback_data.csv`) |
+
+`--share` or a non-local `--host` without `--auth` is refused unless you add
+`--no-auth-i-know-the-risks`. Model locations are set only by whoever starts the app, never in
+the page. The look (colours, fonts, sizes) is defined in one place, `THEME_TOKENS` at the top of
+`skolfie/app/gradio_app.py`.
+
+## Check essays from the command line
+
+```bash
+pip install -e ".[features]"
+skolfie check essay.docx --models-dir /path/to/skolfie/models
+skolfie check essays/ --models-dir /path/to/skolfie/models \
+    --format csv --out results.csv --html reports_html/
+cat essay.txt | skolfie check -          # read from stdin
+skolfie bundle --models-dir models --reports-dir reports --out bundle/   # portable folder
+skolfie info --bundle bundle/
+```
+
+`check` takes files (.txt, .md, .docx, .pdf) and folders (searched recursively) and prints a
+table (file, words, label, AI likelihood, warnings), or CSV / JSON with `--format`. `--html DIR`
+writes one report per essay with the highlights and reasons. A file that cannot be read becomes
+an error row; the exit code is 1 if any file failed. On Colab, `notebooks/app.ipynb` runs it on
+a Drive folder of essays.
 
 ## Run tests and lint
 
