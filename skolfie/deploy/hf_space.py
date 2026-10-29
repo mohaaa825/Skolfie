@@ -1,8 +1,8 @@
 """
 skolfie/deploy/hf_space.py
 ---------------------------
-A permanent Skolfie website on Hugging Face Spaces (free "CPU basic"
-hardware is enough).
+A permanent Skolfie website on Hugging Face Spaces ("CPU basic" hardware is
+enough; Hugging Face hosts Gradio Spaces only for PRO accounts).
 
     build_space(bundle_dir, out_dir, git_ref=..., versions=collect_versions())
         writes a ready-to-upload Space folder (no network):
@@ -307,8 +307,16 @@ def publish_space(space_dir: str | os.PathLike[str], repo_id: str, token: str, *
             from exc
 
     api = HfApi(token=token)
-    api.create_repo(repo_id, repo_type="space", space_sdk="gradio", exist_ok=True,
-                    private=private)
+    try:
+        api.create_repo(repo_id, repo_type="space", space_sdk="gradio", exist_ok=True,
+                        private=private)
+    except Exception as exc:
+        if getattr(getattr(exc, "response", None), "status_code", None) == 402:
+            raise ValueError("Hugging Face refused to create the Space (402 Payment Required): "
+                             "Gradio Spaces need a PRO subscription "
+                             "(https://huggingface.co/pro). Subscribe, then publish again.") \
+                from exc
+        raise
     if auth:
         api.add_space_secret(repo_id, AUTH_SECRET, auth,
                              description="Skolfie login, user:password")

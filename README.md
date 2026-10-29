@@ -347,7 +347,7 @@ the page. The look (colours, fonts, sizes) is defined in one place, `THEME_TOKEN
 ### Publish a website (Hugging Face Spaces)
 
 For a permanent site that teachers can open without Colab running, run section (d) of
-`notebooks/app.ipynb` (it needs a free Hugging Face account and a Write token saved as the
+`notebooks/app.ipynb` (it needs a Hugging Face PRO account, as Hugging Face hosts Gradio apps only for PRO, and a Write token saved as the
 Colab secret `HF_TOKEN`). It does the same as:
 
 ```bash
@@ -361,8 +361,8 @@ HF_TOKEN=... SKOLFIE_APP_AUTH=teacher:long-password \
 installs Skolfie from GitHub at that commit with the library versions of the machine that
 trained the models, `app.py`, the bundle). Run it where the models were trained, or the pickled
 models may not load. The site is `https://yourname-skolfie.hf.space`; it asks for the login in
-the Space secret `SKOLFIE_APP_AUTH` (`space build --public` serves it without one). Free Spaces
-sleep after 48 hours without visitors and wake in about a minute.
+the Space secret `SKOLFIE_APP_AUTH` (`space build --public` serves it without one). Spaces on
+CPU basic sleep after 48 hours without visitors and wake in about a minute.
 
 ## Check essays from the command line
 

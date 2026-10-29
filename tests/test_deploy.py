@@ -206,3 +206,15 @@ def test_cli_space_publish_uses_env(tmp_path: Path, monkeypatch, fake_hub) -> No
     assert code == 0 and "https://me-skolfie.hf.space" in stdout
     assert "secret-token" not in stdout
     assert ("init", "secret-token") in fake_hub.calls
+
+
+def test_publish_space_explains_payment_required(tmp_path: Path, monkeypatch) -> None:
+    class PaidApi(FakeApi):
+        def create_repo(self, repo_id, **kw):
+            err = RuntimeError("402")
+            err.response = types.SimpleNamespace(status_code=402)
+            raise err
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(HfApi=PaidApi))
+    with pytest.raises(ValueError, match="PRO"):
+        hf_space.publish_space(_build(tmp_path), "me/skolfie", "tok", private=False, auth=None)
