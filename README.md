@@ -116,11 +116,12 @@ GPT-3.5/GPT-4-era AI text and no real student essays. The fix adds PERSUADE stud
 about 1,000 essays by `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5` on the same
 15 assignments plus college essays (prompts: `skolfie/data/generation/student.py`).
 
-1. Turn the essay files (`<essays>/<model>/<prompt_id>.txt`) into fresh records; idempotent,
-   reports per-model counts of missing, empty and too-short files:
+1. The 1,000 essays ship as fresh records in [`data/claude_essays/`](data/claude_essays/).
+   New essay files (`<essays>/<model>/<prompt_id>.txt`) become records with
    `python scripts/import_claude_essays.py --plan plan.json --essays-dir essays/ --out-dir data/raw/fresh`
-2. Upload the `claude-*.jsonl` files to `My Drive/skolfie/data/raw/fresh/` and run
-   [`notebooks/retrain_modern.ipynb`](notebooks/retrain_modern.ipynb) on a T4 (about 1.5-2
+   (idempotent; reports per-model counts of missing, empty and too-short files). Put such files
+   in `My Drive/skolfie/data/raw/fresh/` to use them instead of the repo copies.
+2. Run [`notebooks/retrain_modern.ipynb`](notebooks/retrain_modern.ipynb) on a T4 (about 1.5-2
    hours). It builds a new corpus in `data/processed_modern/`, makes splits with
    `configs/splits_modern.json`, retrains the feature model, the transformer and the stacked
    model into `My Drive/skolfie/models_modern/` (the old corpus and models stay), and prints
