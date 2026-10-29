@@ -177,7 +177,9 @@ def _cli(argv, **kw):
     return code, out.getvalue(), err.getvalue()
 
 
-def test_cli_space_build_from_a_bundle(tmp_path: Path) -> None:
+def test_cli_space_build_from_a_bundle(tmp_path: Path, monkeypatch) -> None:
+    # Pins come from the installed libraries; CI may not have gradio installed.
+    monkeypatch.setattr(hf_space, "collect_versions", lambda: dict(VERSIONS))
     bundle = _bundle(tmp_path)
     code, out, _ = _cli(["space", "build", "--bundle", str(bundle), "--out",
                          str(tmp_path / "space"), "--git-ref", "abc1234"])
