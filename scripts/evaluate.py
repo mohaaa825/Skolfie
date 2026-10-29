@@ -31,6 +31,10 @@ Examples:
         --extra-train reports/robust/attacks-train/attacks.parquet \\
         --out-dir reports/transformer-adv --save-model models/transformer-adv.joblib
 
+    # Modern data: repeat the few fresh (current-model) train texts 6 times
+    python scripts/evaluate.py --corpus ... --splits ... --model features \\
+        --oversample fresh=6
+
     # Compare existing reports on the headline metrics
     python scripts/evaluate.py --compare reports/*/report.json
 
@@ -81,6 +85,30 @@ def _positive_int(value: str) -> int:
     return n
 
 
+def parse_oversample(values: Sequence[str]) -> dict[str, int]:
+    """`["fresh=6", "persuade=1,x=2"]` -> {"fresh": 6, "persuade": 1, "x": 2}."""
+    out: dict[str, int] = {}
+    for value in values:
+        for item in value.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            name, sep, factor = item.partition("=")
+            name = name.strip()
+            try:
+                n = int(factor)
+            except ValueError:
+                n = 0
+            if not sep or not name or n < 1:
+                raise argparse.ArgumentTypeError(
+                    f"invalid --oversample {item!r}; use SOURCE=N with an integer N >= 1, "
+                    "e.g. fresh=6")
+            if name in out and out[name] != n:
+                raise argparse.ArgumentTypeError(f"--oversample gives {name!r} twice")
+            out[name] = n
+    return out
+
+
 def default_out_dir(spec: str) -> Path:
     if ":" in spec:
         kind, path = spec.split(":", 1)
@@ -121,6 +149,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "split before fitting, e.g. attacked copies from make_attacks.py "
                              "--share for adversarial training. Repeatable. Rows whose text (or "
                              "orig_id) is in an evaluation split are dropped.")
+    parser.add_argument("--oversample", action="append", default=[], metavar="SOURCE=N",
+                        help="Repeat the train rows of corpus source SOURCE N times in all "
+                             "(e.g. fresh=6 for the few texts from current models). "
+                             "Comma-separated or repeatable. Evaluation splits are unchanged.")
     group = parser.add_argument_group("feature and transformer models (features, transformer, ...)")
     group.add_argument("--cache-dir", type=Path,
                        help="Cache per-text style/GPT-2 features here (parquet keyed by text "
@@ -216,6 +248,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     from skolfie.models.baselines import make_scorer
 
+    try:
+        oversample = parse_oversample(args.oversample)
+    except argparse.ArgumentTypeError as exc:
+        parser.error(str(exc))
     out_dir = args.out_dir or default_out_dir(args.model)
     extra_train = None
     if args.extra_train:
@@ -238,6 +274,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         scorer, corpus, splits, model_spec=args.model, corpus_path=args.corpus,
         splits_path=args.splits, splits_manifest=manifest, max_train=args.max_train,
         max_eval=args.max_eval, seed=args.seed, extra_train=extra_train,
+        oversample=oversample or None,
     )
     if not report["results"]:
         print("error: no evaluation splits found in the splits file", file=sys.stderr)

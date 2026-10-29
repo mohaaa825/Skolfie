@@ -33,7 +33,7 @@ def _by_id(records: list[Record]) -> dict[str, Record]:
 # --------------------------------------------------------------------- registry
 
 def test_registry_and_interface():
-    assert set(SOURCES) == {"hc3", "m4gt", "autextification", "fresh"}
+    assert set(SOURCES) == {"hc3", "m4gt", "autextification", "persuade", "fresh"}
     assert get_source("HC3") is hc3
     with pytest.raises(KeyError, match="unknown source"):
         get_source("nope")
@@ -44,7 +44,7 @@ def test_registry_and_interface():
         assert callable(module.load)
 
 
-@pytest.mark.parametrize("name", ["hc3", "m4gt", "autextification", "fresh"])
+@pytest.mark.parametrize("name", ["hc3", "m4gt", "autextification", "persuade", "fresh"])
 def test_common_contract(name):
     records = _load(SOURCES[name])
     assert records
@@ -59,14 +59,14 @@ def test_common_contract(name):
         assert (r.generator == "human") == (r.label == "human")
 
 
-@pytest.mark.parametrize("name", ["hc3", "m4gt", "autextification", "fresh"])
+@pytest.mark.parametrize("name", ["hc3", "m4gt", "autextification", "persuade", "fresh"])
 def test_ids_are_stable(name):
     first = [r.to_dict() for r in _load(SOURCES[name])]
     second = [r.to_dict() for r in _load(SOURCES[name])]
     assert first == second
 
 
-@pytest.mark.parametrize("name", ["hc3", "m4gt", "autextification", "fresh"])
+@pytest.mark.parametrize("name", ["hc3", "m4gt", "autextification", "persuade", "fresh"])
 def test_missing_files_raise_clear_error(name, tmp_path):
     with pytest.raises(FileNotFoundError) as info:
         _load(SOURCES[name], tmp_path)

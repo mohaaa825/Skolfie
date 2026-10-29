@@ -1,0 +1,25 @@
+{
+  "seed": 0,
+  "fractions": {"train": 0.8, "val": 0.1, "test": 0.1},
+  "held_out_generators": ["gpt-4", "cohere", "claude-haiku-5-5"],
+  "held_out_domains": ["news"],
+  "short_text_max_words": 100,
+  "generator_families": {
+    "bloom-1b7": "bloom",
+    "bloom-3b": "bloom",
+    "bloom-7b1": "bloom",
+    "bloomz": "bloom",
+    "babbage": "gpt-3-base",
+    "curie": "gpt-3-base",
+    "text-davinci-003": "gpt-3-base",
+    "chatgpt": "gpt-3.5",
+    "gpt-3.5-turbo": "gpt-3.5",
+    "gpt-4": "gpt-4",
+    "cohere": "cohere",
+    "dolly-v2-12b": "dolly",
+    "claude-opus-5-5": "claude",
+    "claude-sonnet-5-5": "claude",
+    "claude-haiku-5-5": "claude-haiku"
+  },
+  "shared_topic_groups": ["fresh:persuade-"]
+}

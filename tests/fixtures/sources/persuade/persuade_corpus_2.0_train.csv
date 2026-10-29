@@ -1,0 +1,17 @@
+discourse_id,essay_id_comp,discourse_text,discourse_type,full_text,holistic_essay_score,prompt_name,task,grade_level,ell_status
+0000000000001,A1B2C3D4E5F6,Phones should not be used while driving because it is dangerous,Claim,"Phones should not be used while driving because it is dangerous. When you look at your phone you are not looking at the road and that is how accidents happen. My uncle got in a crash once because he was texting.
+
+In conclusion drivers need to put the phone away.",3,Phones and driving,Independent,10,No
+0000000000002,A1B2C3D4E5F6,When you look at your phone you are not looking at the road and that is how accidents happen,Claim,"Phones should not be used while driving because it is dangerous. When you look at your phone you are not looking at the road and that is how accidents happen. My uncle got in a crash once because he was texting.
+
+In conclusion drivers need to put the phone away.",3,Phones and driving,Independent,10,No
+0000000000003,A1B2C3D4E5F6,"My uncle got in a crash once because he was texting.
+
+In conclusion drivers need to put the phone away.",Claim,"Phones should not be used while driving because it is dangerous. When you look at your phone you are not looking at the road and that is how accidents happen. My uncle got in a crash once because he was texting.
+
+In conclusion drivers need to put the phone away.",3,Phones and driving,Independent,10,No
+0000000000004,0FF1CE000001,You should join the Seagoing Cowboys program because you get to see the world,Claim,You should join the Seagoing Cowboys program because you get to see the world. I went to Europe and China and took care of horses and cows on the ship. It was hard work but it was worth it and I made many friends on the way.,3,"""A Cowboy Who Rode the Waves""",Independent,8,Yes
+0000000000005,0FF1CE000001,I went to Europe and China and took care of horses and cows on the ship,Claim,You should join the Seagoing Cowboys program because you get to see the world. I went to Europe and China and took care of horses and cows on the ship. It was hard work but it was worth it and I made many friends on the way.,3,"""A Cowboy Who Rode the Waves""",Independent,8,Yes
+0000000000006,0FF1CE000001,It was hard work but it was worth it and I made many friends on the way.,Claim,You should join the Seagoing Cowboys program because you get to see the world. I went to Europe and China and took care of horses and cows on the ship. It was hard work but it was worth it and I made many friends on the way.,3,"""A Cowboy Who Rode the Waves""",Independent,8,Yes
+0000000000007,0FF1CE000002,"Dear Senator, I believe we should keep the Electoral College because it makes candidates pay attention to every region",Claim,"Dear Senator, I believe we should keep the Electoral College because it makes candidates pay attention to every region. Without it, the big states would decide every election and the small states would be ignored by everyone running for president.",3,Does the electoral college work?,Independent,11,No
+0000000000008,0FF1CE000002,"Without it, the big states would decide every election and the small states would be ignored by everyone running for president.",Claim,"Dear Senator, I believe we should keep the Electoral College because it makes candidates pay attention to every region. Without it, the big states would decide every election and the small states would be ignored by everyone running for president.",3,Does the electoral college work?,Independent,11,No
