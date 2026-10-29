@@ -19,6 +19,9 @@ dependencies = [
     "pyarrow>=14",
 ]
 
+[project.scripts]
+skolfie = "skolfie.cli:main"
+
 [project.optional-dependencies]
 app = ["gradio>=4"]
 data = ["huggingface_hub>=0.20", "gdown>=5"]

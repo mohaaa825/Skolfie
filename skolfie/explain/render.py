@@ -10,6 +10,9 @@ render_html      one self-contained page (inline CSS, no scripts, no external
                  the top features with their direction and reason.
                  A warning line notes texts with invisible characters or
                  look-alike letters (the explanation's "obfuscation").
+render_result_html  one `skolfie.service` check result as a page (the CLI's
+                 --html reports): headline, warnings, heatmap, reasons and
+                 the disclaimer.
 render_markdown  the review sheet: a checklist table to fill in by hand
                  (are the reasons and the highlighted chunks plausible?),
                  then the details of every case, with each chunk's text
@@ -169,6 +172,51 @@ def render_html(explanations: Sequence[dict], texts: Sequence[str],
             f'<div class="text">{_heatmap_html(text, ex.get("chunks") or [])}</div>'
             f"{_features_html(ex.get('top_features') or [])}"
             "</section>")
+    return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"<title>{html.escape(title)}</title><style>{_CSS}</style></head><body>"
+            + "\n".join(body) + "</body></html>\n")
+
+
+def render_result_html(result: dict, text: str, title: str = "Skolfie report") -> str:
+    """
+    A self-contained HTML report for one `skolfie.service.Detector.check` result: the
+    headline and AI likelihood, warnings and notes, the chunk heatmap, the reasons with
+    their features, and the disclaimer.
+    """
+    label = str(result.get("label") or "")
+    color = _LABEL_COLORS.get(label, "#555")
+    p_ai = result.get("p_ai")
+    likelihood = "n/a" if p_ai is None else f"{_num(100 * float(p_ai), '.0f')}%"
+    body = [
+        f"<h1>{html.escape(title)}</h1>",
+        '<section class="case">'
+        f'<h2><span class="badge" style="background: {color}">'
+        f"{html.escape(label.replace('_', ' ').upper())}</span> "
+        f"{html.escape(str(result.get('headline') or ''))}</h2>"
+        f'<div class="meta">AI likelihood {html.escape(likelihood)} &middot; '
+        f"{int(result.get('n_words') or 0):,} words"
+        f" &middot; {len(result.get('chunks') or [])} chunk(s)</div>",
+    ]
+    for w in result.get("warnings") or []:
+        body.append(f'<p class="warn">{html.escape(str(w.get("message", "")))}</p>')
+    for note in result.get("notes") or []:
+        body.append(f'<p class="note">{html.escape(str(note))}</p>')
+    if result.get("chunks"):
+        body.append(
+            '<p class="legend">Chunks: <span style="background: '
+            f'{_tint(0.95)}">scored AI</span><span style="background: {_tint(0.05)}">scored '
+            "human</span>(stronger colour = more confident; hover a chunk for its score)</p>")
+    body.append(f'<div class="text">{_heatmap_html(text, result.get("chunks") or [])}</div>')
+    reasons = result.get("reasons") or []
+    if reasons:
+        body.append("<h2>Why</h2><ul>"
+                    + "".join(f"<li>{html.escape(str(r))}</li>" for r in reasons) + "</ul>")
+    if result.get("top_features"):
+        body.append(_features_html(result["top_features"]))
+    body.append("</section>")
+    if result.get("disclaimer"):
+        body.append(f'<p class="note">{html.escape(str(result["disclaimer"]))}</p>')
     return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             f"<title>{html.escape(title)}</title><style>{_CSS}</style></head><body>"

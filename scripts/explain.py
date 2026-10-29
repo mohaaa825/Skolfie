@@ -128,46 +128,33 @@ def stratified_ids(df: Any, n: int, seed: int) -> list[str]:
     return [str(x) for x in rng.permutation(np.array(picked, dtype=object))]
 
 
-def _same_file(a: Any, b: Any) -> bool:
-    import os
-
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        return False
-
-
 def reuse_or_load(verdict_model: Any, model_path: Path, path: Path) -> Any:
     """The model saved at `path`, reusing the verdict model or one of its members when it is
-    the same file (a StackedModel loads features.joblib and transformer.joblib itself), so
-    GPT-2 and DistilBERT are not loaded twice."""
-    from skolfie.explain.explainer import load_model
+    the same file (`skolfie.explain.explainer.reuse_or_load`)."""
+    _ensure_repo_on_path()
+    from skolfie.explain.explainer import reuse_or_load as _reuse_or_load
 
-    if _same_file(path, model_path):
-        return verdict_model
-    members = getattr(verdict_model, "members", None)
-    if isinstance(members, dict) and callable(getattr(verdict_model, "_member", None)):
-        for name, member_path in members.items():
-            if _same_file(path, member_path):
-                return verdict_model._member(name).obj
-    return load_model(path)
+    return _reuse_or_load(verdict_model, model_path, path)
 
 
 def chunk_settings(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[str, Any]:
     """Chunk size and chunk rule params from --mixed-report and the --chunk-* flags."""
+    _ensure_repo_on_path()
+    from skolfie.mixed.detector import (
+        DEFAULT_MIN_WORDS,
+        DEFAULT_TARGET_WORDS,
+        read_mixed_report,
+    )
+
     params: dict[str, Any] | None = None
     chunking: dict[str, Any] = {}
     if args.mixed_report is not None:
-        if not args.mixed_report.is_file():
-            parser.error(f"mixed report not found: {args.mixed_report}")
         try:
-            report = json.loads(args.mixed_report.read_text(encoding="utf-8"))
-            params = dict(report["rules"]["chunk"]["params"])
-        except json.JSONDecodeError as exc:
-            parser.error(f"{args.mixed_report} is not valid JSON ({exc}); rerun eval_mixed.py")
-        except (KeyError, TypeError, ValueError):
-            parser.error(f"{args.mixed_report} has no rules.chunk.params")
-        chunking = dict(report.get("chunking") or {})
+            report = read_mixed_report(args.mixed_report)
+        except (FileNotFoundError, ValueError) as exc:
+            parser.error(str(exc))
+        params = report["rule"]
+        chunking = report
     if args.chunk_lo is not None or args.chunk_hi is not None:
         params = dict(params or {})
         if args.chunk_lo is not None:
@@ -177,8 +164,8 @@ def chunk_settings(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     if params is not None and params.get("lo", 0.2) >= params.get("hi", 0.8):
         parser.error(f"chunk rule lo must be below hi, got {params}")
     return {
-        "target_words": args.target_words or int(chunking.get("target_words") or 60),
-        "min_words": args.min_words or int(chunking.get("min_words") or 25),
+        "target_words": args.target_words or chunking.get("target_words") or DEFAULT_TARGET_WORDS,
+        "min_words": args.min_words or chunking.get("min_words") or DEFAULT_MIN_WORDS,
         "rule": params,
     }
 
@@ -189,7 +176,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _ensure_repo_on_path()
     started = time.time()
 
-    from dataclasses import fields
     from functools import partial
 
     from skolfie.eval.report import (
@@ -203,17 +189,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from skolfie.explain.explainer import Explainer, find_feature_model, load_model
     from skolfie.explain.render import render_html, render_markdown
     from skolfie.mixed.chunking import chunk_spans
-    from skolfie.mixed.detector import ChunkRule
+    from skolfie.mixed.detector import chunk_rule_from_params
 
     for flag, path in (("--model", args.model), ("--features-model", args.features_model),
                        ("--chunk-model", args.chunk_model)):
         if path is not None and not path.is_file():
             parser.error(f"{flag} file not found: {path}")
     settings = chunk_settings(args, parser)
-    rule = None
-    if settings["rule"] is not None:
-        known = {f.name for f in fields(ChunkRule)}
-        rule = ChunkRule(**{k: v for k, v in settings["rule"].items() if k in known})
+    rule = None if settings["rule"] is None else chunk_rule_from_params(settings["rule"])
 
     corpus = load_corpus(args.corpus)
     splits = load_splits(args.splits)

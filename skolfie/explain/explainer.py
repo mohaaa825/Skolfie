@@ -40,7 +40,8 @@ returns "human" / "uncertain" / "ai", else from P(ai) >= 0.5. The SHAP
 explanations always come from the LightGBM feature model (Model B): pass it,
 or let the Explainer find it as the verdict model itself or as a member of a
 `StackedModel`. Chunks are scored with `chunk_scorer` (default: the verdict
-model). Models can be passed as objects or as paths to joblib files.
+model). Models can be passed as objects or as paths to joblib files;
+`reuse_or_load` loads a path that is a StackedModel member from the member.
 """
 
 from __future__ import annotations
@@ -64,6 +65,33 @@ def load_model(model: Model) -> Any:
 
         return JoblibScorer(model).obj
     return model
+
+
+def same_file(a: Any, b: Any) -> bool:
+    """Whether paths `a` and `b` name the same existing file (False if either is missing)."""
+    try:
+        return os.path.samefile(a, b)
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def reuse_or_load(verdict_model: Any, model_path: Any, path: Any) -> Any:
+    """
+    The model saved at `path`, reusing `verdict_model` (loaded from `model_path`) or one
+    of its members when `path` is the same file.
+
+    A StackedModel loads its members (features.joblib, transformer.joblib) itself, so
+    loading the feature or chunk model again by path would load GPT-2 and DistilBERT
+    twice.
+    """
+    if same_file(path, model_path):
+        return verdict_model
+    members = getattr(verdict_model, "members", None)
+    if isinstance(members, dict) and callable(getattr(verdict_model, "_member", None)):
+        for name, member_path in members.items():
+            if same_file(path, member_path):
+                return verdict_model._member(name).obj
+    return load_model(path)
 
 
 def predict_p_ai(model: Any, texts: Sequence[str]) -> np.ndarray:
