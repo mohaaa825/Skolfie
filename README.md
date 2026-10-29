@@ -313,11 +313,32 @@ By default the model is written to `models/detector_model.joblib`. Run
 ## Run the app
 
 ```bash
-python -m skolfie.app
+pip install -e ".[features,app]"
+python -m skolfie.app --models-dir /path/to/skolfie/models --reports-dir /path/to/skolfie/reports
+# or, with a folder made by `skolfie bundle`:
+python -m skolfie.app --bundle /path/to/bundle
 ```
 
-Then open the local URL that Gradio prints (usually `http://127.0.0.1:7860`).
-The app needs a trained model. Train one first.
+Then open the local URL that Gradio prints (usually `http://127.0.0.1:7860`). Paste an essay
+or upload a .txt/.docx/.pdf: the app shows the verdict (Human / AI / Mixed / Uncertain / Too
+short), the AI likelihood, the text with its AI-looking parts highlighted, the reasons, known
+fairness limitations and other warnings. Without models it says how to get them (train them
+with the notebooks, or on Colab just run `notebooks/app.ipynb`).
+
+| Option | Environment variable | |
+|---|---|---|
+| `--bundle DIR` | `SKOLFIE_BUNDLE` | bundle folder (`skolfie bundle`) |
+| `--models-dir DIR` | `SKOLFIE_MODELS_DIR` | models folder (default `./models`) |
+| `--reports-dir DIR` | `SKOLFIE_REPORTS_DIR` | reports folder (default: `reports/` next to the models) |
+| `--auth USER:PASSWORD` | `SKOLFIE_APP_AUTH` | require a login (prefer the variable) |
+| `--share`, `--host`, `--port` | `GRADIO_SERVER_NAME`, `GRADIO_SERVER_PORT` | where to serve (default `127.0.0.1:7860`, no share link) |
+| `--show-feedback` | `SKOLFIE_SHOW_FEEDBACK=1` | add the Feedback & Dataset panel (lists every stored text) |
+| | `SKOLFIE_FEEDBACK` | feedback CSV (default `feedback_data.csv`) |
+
+`--share` or a non-local `--host` without `--auth` is refused unless you add
+`--no-auth-i-know-the-risks`. Model locations are set only by whoever starts the app, never in
+the page. The look (colours, fonts, sizes) is defined in one place, `THEME_TOKENS` at the top of
+`skolfie/app/gradio_app.py`.
 
 ## Run tests and lint
 
