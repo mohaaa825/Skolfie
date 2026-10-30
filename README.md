@@ -109,14 +109,17 @@ Providers: `anthropic`, `openai`, `gemini`, and any OpenAI-compatible server
 resumable and append to `data/raw/fresh/<model>.jsonl`. Rebuild the corpus
 afterwards to include them.
 
-### Retrain on modern data (student essays + current Claude models)
+### Retrain on modern data (student essays + current Claude and Gemini models)
 
 Essays written entirely by current models scored 0% AI: the public corpora only have
 GPT-3.5/GPT-4-era AI text and no real student essays. The fix adds PERSUADE student essays and
 about 1,000 essays by `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5` on the same
-15 assignments plus college essays (prompts: `skolfie/data/generation/student.py`).
+15 assignments plus college essays (prompts: `skolfie/data/generation/student.py`), and 999
+essays by Gemini Flash / Flash-Lite models on 27 school topics.
 
-1. The 1,000 essays ship as fresh records in [`data/claude_essays/`](data/claude_essays/).
+1. The essays ship as fresh records in [`data/ai_essays/`](data/ai_essays/). A CSV of essays
+   (one row per essay, as the Gemini batch) becomes records with
+   `python scripts/import_csv_essays.py essays.csv --prefix gemini --out-dir data/raw/fresh`.
    New essay files (`<essays>/<model>/<prompt_id>.txt`) become records with
    `python scripts/import_claude_essays.py --plan plan.json --essays-dir essays/ --out-dir data/raw/fresh`
    (idempotent; reports per-model counts of missing, empty and too-short files). Put such files
@@ -134,9 +137,11 @@ pulling the Opus/Sonnet essays on that assignment out of train (human essays sha
 topics, so a topic is no shortcut); on AI-only college topics the usual group rule still
 applies. Configs without the key keep their hash and `splits_version`.
 
-The few hundred Claude training essays would be lost among 176k older texts, so training
-repeats them: `evaluate.py --oversample fresh=6` repeats every train row of corpus source
-`fresh` 6 times (comma-separated or repeatable, `SOURCE=N`). Only the rows passed to `fit()`
+The ~1,300 Claude and Gemini training essays would be lost among 176k older texts, so training
+repeats them: `evaluate.py --oversample fresh=3` (the notebook's setting) repeats every train
+row of corpus source `fresh` 3 times (comma-separated or repeatable, `SOURCE=N`). With 6,000
+PERSUADE essays that keeps AI and human student essays roughly balanced in train, so the model
+does not learn "student essay = AI". Only the rows passed to `fit()`
 change, so it works for every model, and evaluation splits are untouched. The copies can land
 in a model's own internal hold-out (LightGBM early stopping, the transformer's eval rows, the
 Delta folds), which makes those internal numbers slightly optimistic. The stacker is not
@@ -474,6 +479,7 @@ skolfie/
 │   ├── eval_fairness.py           # Human FPR per subgroup + known limitations
 │   ├── generate_ai_texts.py       # Fresh AI text from current models
 │   ├── import_claude_essays.py    # Essay .txt files + prompt plan -> fresh JSONL
+│   ├── import_csv_essays.py       # CSV of essays (e.g. Gemini batch) -> fresh JSONL
 │   └── train.py                   # Training CLI (--data, --feedback, --seed-demo)
 ├── tests/
 │   ├── conftest.py                # Shared fixtures (extractor, seed texts)

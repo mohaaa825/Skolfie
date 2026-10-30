@@ -19,7 +19,13 @@
     "dolly-v2-12b": "dolly",
     "claude-opus-5-5": "claude",
     "claude-sonnet-5-5": "claude",
-    "claude-haiku-5-5": "claude-haiku"
+    "claude-haiku-5-5": "claude-haiku",
+    "gemini-3.1-flash-lite": "gemini",
+    "gemini-3.5-flash": "gemini",
+    "gemini-3.5-flash-lite": "gemini",
+    "gemini-3.6-flash": "gemini",
+    "gemini-3.7-flash": "gemini",
+    "gemini-flash-lite-latest": "gemini"
   },
   "shared_topic_groups": ["fresh:persuade-"]
 }
