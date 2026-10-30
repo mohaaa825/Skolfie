@@ -38,6 +38,16 @@ on, which makes those internal numbers, and the number of trees or the
 checkpoint they pick, slightly optimistic. The stacker (`scripts/stack.py`)
 is not oversampled: it calibrates on `val` as it is.
 
+Kept sources (`keep_sources=["fresh", "persuade"]`, `evaluate.py
+--keep-sources fresh,persuade`): when `max_train` / `max_eval` sample a
+split down, the rows of these sources are always kept and only the other
+rows are sampled (stratified by label) to fill the rest, so a slow scorer
+(e.g. the feature model with Binoculars features) trained on 40k of 176k
+texts never loses the few modern student and AI essays. If the kept rows
+alone exceed the limit, all of them are kept and nothing else. The
+report's `sampling` block records the sources and how many rows each
+split kept.
+
 A report may also carry `verdicts` (cut-offs and the share of Human /
 Uncertain / AI verdicts per split, added by `scripts/stack.py`); it is
 rendered when present.
@@ -145,6 +155,29 @@ def stratified_sample(df: pd.DataFrame, max_n: int | None, seed: int) -> pd.Data
     parts = [df[df["label"] == lab].sample(n=int(k), random_state=seed)
              for lab, k in take.items() if k > 0]
     return pd.concat(parts).sort_index(kind="stable")
+
+
+def sample_keeping(df: pd.DataFrame, max_n: int | None, seed: int,
+                   keep: Sequence[str] | None = None,
+                   column: str = "source") -> tuple[pd.DataFrame, dict[str, int]]:
+    """`stratified_sample`, except that rows whose `column` is in `keep` are never dropped.
+
+    Returns (sample, {kept value: rows kept}); the dict is empty when nothing
+    was sampled. The other rows fill the remaining `max_n - n_kept` places,
+    stratified by label (none if the kept rows already reach `max_n`).
+    """
+    if not keep or max_n is None or len(df) <= max_n:
+        return stratified_sample(df, max_n, seed), {}
+    if column not in df.columns:
+        raise ValueError(f"cannot keep sources: the corpus has no {column!r} column")
+    values = df[column].astype(str)
+    is_kept = values.isin(set(keep)).to_numpy()
+    kept, rest = df[is_kept], df[~is_kept]
+    room = max_n - len(kept)
+    rest = stratified_sample(rest, room, seed) if room > 0 else rest.iloc[:0]
+    counts = values[is_kept].value_counts()
+    info = {str(v): int(counts.get(v, 0)) for v in sorted(set(keep))}
+    return pd.concat([kept, rest]).sort_index(kind="stable"), info
 
 
 def split_frame(corpus: pd.DataFrame, splits: pd.DataFrame, name: str) -> tuple[pd.DataFrame, int]:
@@ -256,6 +289,7 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
                    seed: int = 0, eval_splits: Sequence[str] = EVAL_SPLITS,
                    extra_train: pd.DataFrame | None = None,
                    oversample: dict[str, int] | None = None,
+                   keep_sources: Sequence[str] | None = None,
                    log: Any = print) -> tuple[dict[str, Any], pd.DataFrame]:
     """Fit on `train`, score every eval split. Returns (report dict, predictions frame).
 
@@ -266,10 +300,23 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
 
     `oversample` ({source: factor}) repeats the sampled train rows of those
     sources (see `oversample_rows` and the module docstring).
+
+    `keep_sources` (corpus `source` values) are never sampled away by
+    `max_train` / `max_eval` (see `sample_keeping`).
     """
     started = time.time()
     manifest = splits_manifest or {}
     available = set(splits["split"].unique())
+    keep = sorted(set(keep_sources or ()))
+    kept_rows: dict[str, dict[str, int]] = {}
+    if keep:
+        if "source" not in corpus.columns:
+            raise ValueError("cannot keep sources: the corpus has no 'source' column")
+        present = set(corpus["source"].astype(str).unique())
+        unknown = [k for k in keep if k not in present]
+        if unknown:  # a typo would otherwise silently sample the modern essays away
+            raise ValueError(f"cannot keep source(s) {', '.join(unknown)}: not in the corpus "
+                             f"(it has: {', '.join(sorted(present)) or '(none)'})")
 
     # --- fit --------------------------------------------------------------- #
     pretrained = bool(getattr(scorer, "pretrained", False))
@@ -282,7 +329,11 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
     else:
         train_df, missing = split_frame(corpus, splits, TRAIN_SPLIT)
         n_available = len(train_df)
-        train_df = stratified_sample(train_df, max_train, seed)
+        train_df, kept = sample_keeping(train_df, max_train, seed, keep)
+        if kept:
+            kept_rows[TRAIN_SPLIT] = kept
+            log("[fit] kept every train row of "
+                + ", ".join(f"{k} ({n})" for k, n in kept.items()))
         y = to_binary(train_df["label"].tolist())
         if n_available == 0 or np.unique(y).size < 2:
             raise ValueError("the train split needs both human and ai texts")
@@ -320,7 +371,9 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
             continue
         df, missing = split_frame(corpus, splits, name)
         n_available = len(df)
-        df = stratified_sample(df, max_eval, seed)
+        df, kept = sample_keeping(df, max_eval, seed, keep)
+        if kept:
+            kept_rows[name] = kept
         t0 = time.time()
         p = np.asarray(scorer.predict_proba(df["text"].tolist()), dtype=np.float64)
         predict_seconds = time.time() - t0
@@ -360,7 +413,8 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
                    "splits_version": manifest.get("splits_version"),
                    "corpus_version": manifest.get("corpus_version")},
         "sampling": {"seed": seed, "max_train": max_train, "max_eval": max_eval,
-                     **({"oversample": dict(oversample)} if oversample else {})},
+                     **({"oversample": dict(oversample)} if oversample else {}),
+                     **({"keep_sources": keep, "kept_rows": kept_rows} if keep else {})},
         "train": train_info,
         "results": results,
         "git": git_info(),
@@ -482,7 +536,9 @@ def render_report_md(report: dict[str, Any]) -> str:
         f"splits: `{report['splits'].get('splits_version') or 'unversioned'}`",
         f"- train: {train_line}",
         f"- sampling: seed {sampling.get('seed')}, max_train {sampling.get('max_train')}, "
-        f"max_eval {sampling.get('max_eval')}",
+        f"max_eval {sampling.get('max_eval')}"
+        + (f", always kept: {', '.join(sampling['keep_sources'])}"
+           if sampling.get("keep_sources") else ""),
         f"- git: `{commit}`, created {report.get('created_at')}, "
         f"total {report.get('total_seconds', 0):.1f}s",
         "",

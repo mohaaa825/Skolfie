@@ -4,7 +4,7 @@ skolfie/explain/reasons.py
 Plain-language reasons for the feature model's (Model B's) features, for the
 explanations of roadmap step 8.
 
-Every feature in `STYLE_FEATURES`, `LM_FEATURES` and `DELTA_FEATURES` has an
+Every feature in `STYLE_FEATURES`, `LM_FEATURES`, `BINO_FEATURES` and `DELTA_FEATURES` has an
 entry with
 
     group     the psycholinguistic dimension it measures, following the
@@ -194,6 +194,25 @@ REASONS: dict[str, Reason] = {
     "lm_nll_minus_entropy": _r("predictability", "surprise versus expected surprise",
                                "words less surprising than the language model expects",
                                "words more surprising than the language model expects", "low"),
+    # ---- Binoculars (modern observer / performer LM pair) ----------------- #
+    "bino_obs_log_ppl": _r("predictability", "perplexity under a modern language model",
+                           "highly predictable to a modern language model",
+                           "surprising to a modern language model", "low"),
+    "bino_x_ppl": _r("predictability", "how open the context leaves the next word "
+                     "(cross-perplexity)",
+                     "context that makes any continuation predictable",
+                     "context that leaves many continuations open", "low"),
+    "bino_score": _r("predictability", "Binoculars score",
+                     "wording more predictable than its context explains (low Binoculars score)",
+                     "wording less predictable than its context explains "
+                     "(high Binoculars score)", "low"),
+    "bino_perf_log_ppl": _r("predictability", "perplexity under a chat model",
+                            "highly predictable to a chat-tuned language model",
+                            "surprising to a chat-tuned language model", "low"),
+    "bino_obs_nll_std": _r("burstiness", "word-to-word variation in predictability "
+                           "(modern language model)",
+                           "evenly predictable from word to word",
+                           "predictability that jumps from word to word", "low"),
     # ---- Delta word profile ---------------------------------------------- #
     "delta_cos_human": _r("word profile", "distance to human common-word use",
                           "common words used much like human writing",

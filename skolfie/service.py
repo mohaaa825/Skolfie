@@ -12,7 +12,9 @@ REST API use to check a text.
     Detector.from_bundle(bundle_dir)               a portable folder made by
                                                    `make_bundle` (bundle.json)
     detector.check(text) / check_many(texts)       one result dict per text
-    detector.info()                                what was loaded or missing
+    detector.info()                                what was loaded or missing,
+                                                   and which language models
+                                                   the feature model runs
 
 Files (names without .joblib can be changed with verdict= / features= / chunk=):
 
@@ -463,6 +465,19 @@ class Detector:
                                                   "known limitations"),
                                        files.known_limitations)
 
+        # Which LMs the feature model runs (GPT-2, and the Binoculars pair if on);
+        # duck-typed, since any object with featurize/predict_proba can stand in.
+        lms = getattr(feature_model, "language_models", None)
+        language_models = lms() if callable(lms) else None
+        notes = list(files.notes)
+        if language_models and language_models.get("bino_observer"):
+            pair = " + ".join(m for m in (language_models["bino_observer"],
+                                          language_models.get("bino_performer")) if m)
+            notes.append(f"the feature model uses Binoculars features from {pair}, loaded on the "
+                         "first check: it needs a GPU with enough memory (about 6 GB for the "
+                         "Qwen2.5-1.5B pair in fp16, about 18 GB for a 4-bit 27B observer); "
+                         "on a CPU every check is very slow")
+
         explainer = Explainer(verdict_model, feature_model, chunk_scorer=chunk_model,
                               chunk_rule=rule, reference=reference,
                               chunker=partial(chunk_spans, target_words=target_words,
@@ -473,7 +488,8 @@ class Detector:
             "files": files.as_dict(),
             "members": members,
             "missing": list(dict.fromkeys(files.missing)),
-            "notes": list(files.notes),
+            "notes": notes,
+            "language_models": language_models,
             "mixed_enabled": rule is not None,
             "chunking": {"target_words": int(target_words), "min_words": int(min_words)},
             "known_limitations": len(limitations),

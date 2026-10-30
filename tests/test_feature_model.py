@@ -246,3 +246,126 @@ def test_make_scorer_feature_specs(model_cls, tmp_path: Path) -> None:
     assert (m.classifier, m.use_lm, m.seed, m.cache_dir) == ("rf", False, 3, str(tmp_path))
     assert m.lm_model == "gpt2"  # None options fall back to the defaults
     assert make_scorer("features").use_lm is True
+
+
+# --------------------------------------------------------------------------- #
+# FeatureModel with Binoculars features
+# --------------------------------------------------------------------------- #
+class FakeBino:
+    """Stands in for BinocularsFeaturizer: observer-only style rows (NaN pair columns)."""
+
+    cache_key = "fake_obs+fake_perf-t16"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def features(self, texts, progress=False):
+        from skolfie.features.binoculars import BINO_FEATURES
+
+        self.calls += len(texts)
+        out = np.full((len(texts), len(BINO_FEATURES)), np.nan, dtype=np.float32)
+        for i, t in enumerate(texts):
+            words = t.split()
+            out[i, 0] = len(set(words)) / max(len(words), 1)
+            out[i, 4] = len(words) % 7
+        return out
+
+
+def test_feature_model_bino_off_by_default(model_cls) -> None:
+    model = model_cls(log=lambda m: None)
+    assert model.bino_observer is None and model.name == "features"
+    assert "bino_observer" not in model.params()
+    assert model.language_models() == {"lm": "gpt2", "bino_observer": None,
+                                       "bino_performer": None, "bino_quantization": None,
+                                       "bino_max_tokens": None}
+    # "" (an empty notebook setting) is off too.
+    assert model_cls(bino_observer="", bino_performer="", log=lambda m: None).bino_observer is None
+    with pytest.raises(ValueError):
+        model_cls(bino_observer="x", bino_quantization="2bit")
+    with pytest.raises(ValueError):
+        model_cls(bino_performer="x")
+
+
+def test_feature_model_with_bino_and_cache(model_cls, corpus, tmp_path: Path) -> None:
+    pytest.importorskip("lightgbm")
+    from skolfie.features.binoculars import BINO_FEATURES, BinocularsFeaturizer
+    from skolfie.features.style import STYLE_FEATURES
+
+    fake = FakeBino()
+    texts, labels = corpus["text"].tolist(), corpus["label"].tolist()
+    model = model_cls(use_lm=False, delta_words=50, delta_folds=3, n_jobs=1, cache_dir=tmp_path,
+                      log=lambda m: None, lgbm_params={"n_estimators": 50},
+                      bino_observer="Qwen/Qwen2.5-1.5B",
+                      bino_performer="Qwen/Qwen2.5-1.5B-Instruct", bino_max_tokens=128,
+                      bino_quantization="4bit")
+    assert model.name == "features-nolm+bino"
+    model._bino = fake
+    model.fit(texts, labels)
+    names = model.feature_names_
+    n_style = len(STYLE_FEATURES)
+    assert names[n_style:n_style + len(BINO_FEATURES)] == list(BINO_FEATURES)
+    assert names[-len(DELTA_FEATURES):] == list(DELTA_FEATURES)
+    assert model.featurize(texts[:3]).shape == (3, len(names))
+    assert fake.calls == len(set(texts))
+    assert sorted(p.name for p in tmp_path.glob("*.parquet")) == [
+        "bino-v1-fake_obs+fake_perf-t16.parquet", "style-v1.parquet"]
+    p = model.predict_proba(texts)
+    assert fake.calls == len(set(texts))  # cached
+    params = model.params()
+    assert params["bino_observer"] == "Qwen/Qwen2.5-1.5B"
+    assert params["bino_performer"] == "Qwen/Qwen2.5-1.5B-Instruct"
+    assert params["bino_quantization"] == "4bit" and params["bino_max_tokens"] == 128
+    assert model.language_models()["bino_observer"] == "Qwen/Qwen2.5-1.5B"
+
+    # base_features (what the transformer and the fairness check use) has no bino columns.
+    base, base_names = model.base_features(texts[:2])
+    assert base.shape[1] == len(base_names)
+    assert not any(n.startswith("bino_") for n in base_names)
+
+    # Pickling drops the featurizer; reloaded, it is rebuilt lazily from the settings,
+    # without loading any model, and the cached features give the same scores.
+    path = tmp_path / "model.joblib"
+    joblib.dump(model, path)
+    loaded = joblib.load(path)
+    assert loaded._bino is None and loaded._caches == {}
+    lazy = loaded._bino_featurizer()
+    assert isinstance(lazy, BinocularsFeaturizer) and not lazy._ready
+    assert (lazy.observer, lazy.performer, lazy.max_tokens, lazy.quantization) == (
+        "Qwen/Qwen2.5-1.5B", "Qwen/Qwen2.5-1.5B-Instruct", 128, "4bit")
+    assert lazy.cache_key == "Qwen_Qwen2.5-1.5B+Qwen_Qwen2.5-1.5B-Instruct-t128-q4bit"
+    loaded._bino = fake
+    np.testing.assert_allclose(loaded.predict_proba(texts), p)
+    assert fake.calls == len(set(texts))
+
+
+def test_old_pickle_without_bino_attributes_loads_and_predicts(model_cls, corpus,
+                                                               tmp_path: Path) -> None:
+    pytest.importorskip("lightgbm")
+    texts, labels = corpus["text"].tolist(), corpus["label"].tolist()
+    model = model_cls(use_lm=False, delta_words=50, delta_folds=3, n_jobs=1,
+                      log=lambda m: None, lgbm_params={"n_estimators": 50}).fit(texts, labels)
+    p = model.predict_proba(texts)
+    # A model saved before Binoculars existed has none of these attributes.
+    state = model.__getstate__()
+    for key in ("bino_observer", "bino_performer", "bino_max_tokens", "bino_batch_size",
+                "bino_quantization", "_bino"):
+        del state[key]
+    old = object.__new__(model_cls)
+    old.__dict__.update(state)
+    joblib.dump(old, tmp_path / "old.joblib")
+    loaded = joblib.load(tmp_path / "old.joblib")
+    assert loaded.bino_observer is None and loaded._bino is None
+    np.testing.assert_allclose(loaded.predict_proba(texts), p)
+    assert loaded.language_models()["bino_observer"] is None
+
+
+def test_make_scorer_bino_options(model_cls) -> None:
+    from skolfie.models.baselines import make_scorer
+
+    m = make_scorer("features", bino_observer="Qwen/Qwen2.5-1.5B",
+                    bino_performer="Qwen/Qwen2.5-1.5B-Instruct", bino_max_tokens=64,
+                    bino_batch_size=4, bino_quantization=None)
+    assert (m.bino_observer, m.bino_performer, m.bino_max_tokens, m.bino_batch_size) == (
+        "Qwen/Qwen2.5-1.5B", "Qwen/Qwen2.5-1.5B-Instruct", 64, 4)
+    assert m.name == "features+bino"
+    assert make_scorer("features").bino_observer is None

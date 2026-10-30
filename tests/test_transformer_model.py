@@ -410,3 +410,24 @@ def test_chunk_training_options_are_validated() -> None:
     with pytest.raises(ValueError):
         TransformerModel(chunk_words=0)
     assert TransformerModel().name == "transformer"
+
+
+def test_transformer_with_a_bino_feature_model_uses_base_features_only(tokenizer,
+                                                                       corpus) -> None:
+    """A FeatureModel with Binoculars on can serve as the transformer's feature extractor:
+    `base_features` never computes (or returns) the bino_* columns."""
+
+    class NoBino:
+        cache_key = "never"
+
+        def features(self, texts, progress=False):
+            raise AssertionError("the transformer must not compute Binoculars features")
+
+    train, test = corpus
+    model = make(tokenizer, epochs=1)
+    model._features = FeatureModel(use_lm=False, n_jobs=1, log=lambda m: None,
+                                   bino_observer="Qwen/Qwen2.5-1.5B")
+    model._features._bino = NoBino()
+    model.fit(train["text"].tolist(), train["label"].tolist())
+    assert not any(n.startswith("bino_") for n in model.feature_names_)
+    assert model.predict_proba(test["text"].tolist()[:4]).shape == (4,)

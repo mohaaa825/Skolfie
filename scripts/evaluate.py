@@ -35,6 +35,12 @@ Examples:
     python scripts/evaluate.py --corpus ... --splits ... --model features \\
         --oversample fresh=6
 
+    # Feature model plus Binoculars features from a modern Qwen pair (GPU, ~10x
+    # slower than GPT-2): train on 40k texts, never sampling away the modern essays
+    python scripts/evaluate.py --corpus ... --splits ... --model features \\
+        --bino-observer Qwen/Qwen2.5-1.5B --bino-performer Qwen/Qwen2.5-1.5B-Instruct \\
+        --max-train 40000 --keep-sources fresh,persuade --cache-dir data/cache
+
     # Compare existing reports on the headline metrics
     python scripts/evaluate.py --compare reports/*/report.json
 
@@ -56,8 +62,8 @@ MODEL_CHOICES = (
     "length | tfidf | features | features-nolm | features-rf | features-nolm-rf | ensemble | "
     "transformer | transformer-text | transformer-chunks | ensemble:PATH | joblib:PATH"
 )
-NAMED_MODELS = ("features", "features-nolm", "features-rf", "features-nolm-rf",
-                  "transformer", "transformer-text", "transformer-chunks")
+FEATURE_MODELS = ("features", "features-nolm", "features-rf", "features-nolm-rf")
+NAMED_MODELS = (*FEATURE_MODELS, "transformer", "transformer-text", "transformer-chunks")
 # The ensemble calls predict() per text and extracts NLTK features: keep it bounded.
 ENSEMBLE_DEFAULT_MAX_TRAIN = 5000
 ENSEMBLE_DEFAULT_MAX_EVAL = 2000
@@ -109,6 +115,14 @@ def parse_oversample(values: Sequence[str]) -> dict[str, int]:
     return out
 
 
+def parse_keep_sources(values: Sequence[str]) -> list[str]:
+    """`["fresh,persuade", "x"]` -> ["fresh", "persuade", "x"] (order kept, no repeats)."""
+    out: list[str] = []
+    for value in values:
+        out += [s for s in (item.strip() for item in value.split(",")) if s and s not in out]
+    return out
+
+
 def default_out_dir(spec: str) -> Path:
     if ":" in spec:
         kind, path = spec.split(":", 1)
@@ -153,6 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Repeat the train rows of corpus source SOURCE N times in all "
                              "(e.g. fresh=6 for the few texts from current models). "
                              "Comma-separated or repeatable. Evaluation splits are unchanged.")
+    parser.add_argument("--keep-sources", action="append", default=[], metavar="SOURCES",
+                        help="Corpus sources whose rows --max-train / --max-eval never sample "
+                             "away (e.g. fresh,persuade); only the other rows are sampled, "
+                             "stratified by label, to fill the rest. Comma-separated or "
+                             "repeatable.")
     group = parser.add_argument_group("feature and transformer models (features, transformer, ...)")
     group.add_argument("--cache-dir", type=Path,
                        help="Cache per-text style/GPT-2 features here (parquet keyed by text "
@@ -162,6 +181,23 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Truncate texts to N tokens for the LM (default: 512).")
     group.add_argument("--lm-batch-size", type=_positive_int, help="LM batch size (default: 32).")
     group.add_argument("--lm-device", help="cuda / cpu (default: cuda if available).")
+    group.add_argument("--bino-observer", metavar="HF_ID",
+                       help="Feature models only: add Binoculars features (bino_*) from this "
+                            "observer LM, e.g. Qwen/Qwen2.5-1.5B (default: off). Needs a GPU; "
+                            "about 10x slower than GPT-2, so combine with --max-train and "
+                            "--keep-sources.")
+    group.add_argument("--bino-performer", metavar="HF_ID",
+                       help="Performer LM with the observer's tokenizer, e.g. "
+                            "Qwen/Qwen2.5-1.5B-Instruct (default: none = observer-only "
+                            "features, no cross-perplexity / Binoculars score).")
+    group.add_argument("--bino-max-tokens", type=_positive_int,
+                       help="Truncate texts to N tokens for Binoculars (default: 256).")
+    group.add_argument("--bino-batch-size", type=_positive_int,
+                       help="Binoculars batch size (default: 8).")
+    group.add_argument("--bino-quantization", choices=("4bit", "8bit"),
+                       help="Load the Binoculars models in 4-bit (nf4) or 8-bit with "
+                            "bitsandbytes, e.g. for a 27B observer on a 24 GB GPU "
+                            "(default: fp16 on CUDA).")
     group.add_argument("--n-jobs", type=int,
                        help="Worker processes for style features and the classifier "
                             "(default: -1 = all cores).")
@@ -252,6 +288,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         oversample = parse_oversample(args.oversample)
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
+    keep_sources = parse_keep_sources(args.keep_sources)
+    if args.bino_observer and args.model not in FEATURE_MODELS:
+        parser.error("--bino-observer is for the feature models only "
+                     f"({', '.join(FEATURE_MODELS)}); the transformer keeps its own features")
+    if args.bino_performer and not args.bino_observer:
+        parser.error("--bino-performer needs --bino-observer")
     out_dir = args.out_dir or default_out_dir(args.model)
     extra_train = None
     if args.extra_train:
@@ -269,13 +311,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          lm_batch_size=args.lm_batch_size, lm_device=args.lm_device,
                          n_jobs=args.n_jobs, model_name=args.hf_model,
                          max_length=args.max_length, epochs=args.epochs,
-                         batch_size=args.batch_size)
-    report, predictions = run_evaluation(
-        scorer, corpus, splits, model_spec=args.model, corpus_path=args.corpus,
-        splits_path=args.splits, splits_manifest=manifest, max_train=args.max_train,
-        max_eval=args.max_eval, seed=args.seed, extra_train=extra_train,
-        oversample=oversample or None,
-    )
+                         batch_size=args.batch_size, bino_observer=args.bino_observer,
+                         bino_performer=args.bino_performer,
+                         bino_max_tokens=args.bino_max_tokens,
+                         bino_batch_size=args.bino_batch_size,
+                         bino_quantization=args.bino_quantization)
+    try:
+        report, predictions = run_evaluation(
+            scorer, corpus, splits, model_spec=args.model, corpus_path=args.corpus,
+            splits_path=args.splits, splits_manifest=manifest, max_train=args.max_train,
+            max_eval=args.max_eval, seed=args.seed, extra_train=extra_train,
+            oversample=oversample or None, keep_sources=keep_sources or None,
+        )
+    except ValueError as exc:
+        if keep_sources and "cannot keep source" in str(exc):
+            parser.error(str(exc))
+        raise
     if not report["results"]:
         print("error: no evaluation splits found in the splits file", file=sys.stderr)
         return 2

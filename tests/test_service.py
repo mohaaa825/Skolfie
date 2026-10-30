@@ -86,6 +86,15 @@ class FakeFeatureModel:
         return 1 / (1 + np.exp(-raw))
 
 
+class FakeBinoFeatureModel(FakeFeatureModel):
+    """A feature model that reports a Binoculars pair, like FeatureModel(bino_observer=...)."""
+
+    def language_models(self):
+        return {"lm": "gpt2", "bino_observer": "Qwen/Qwen2.5-1.5B",
+                "bino_performer": "Qwen/Qwen2.5-1.5B-Instruct", "bino_quantization": None,
+                "bino_max_tokens": 256}
+
+
 # --------------------------------------------------------------------------- #
 # Texts
 # --------------------------------------------------------------------------- #
@@ -295,6 +304,21 @@ def test_member_paths_are_remapped_and_reused(dirs, detector) -> None:
     assert info["limits"]["max_text_chars"] == MAX_TEXT_CHARS
     assert "numpy" in info["versions"]
     json.dumps(info, allow_nan=False)
+
+
+def test_info_names_the_language_models(dirs, detector, tmp_path: Path) -> None:
+    # A feature model without language_models() (any duck-typed scorer): None, no note.
+    assert detector.info()["language_models"] is None
+    bino = make_colab_dirs(tmp_path / "bino")
+    joblib.dump(FakeBinoFeatureModel(), bino["models"] / "features.joblib")
+    det = Detector.from_dirs(bino["models"], bino["reports"])
+    info = det.info()
+    assert info["language_models"]["bino_observer"] == "Qwen/Qwen2.5-1.5B"
+    assert info["language_models"]["bino_performer"] == "Qwen/Qwen2.5-1.5B-Instruct"
+    note = [n for n in info["notes"] if "Binoculars" in n]
+    assert note and "Qwen/Qwen2.5-1.5B + Qwen/Qwen2.5-1.5B-Instruct" in note[0]
+    assert "GPU" in note[0]
+    assert det.check(AI_ESSAY)["label"] in service.LABELS
 
 
 def test_missing_optional_files(tmp_path: Path) -> None:

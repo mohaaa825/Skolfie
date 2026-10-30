@@ -377,6 +377,10 @@ TRANSFORMER_SPECS = {
 }
 # make_scorer options that only the transformer model takes.
 _TRANSFORMER_ONLY = ("model_name", "max_length", "epochs", "batch_size")
+# make_scorer options that only the feature model takes (the transformer keeps
+# its own style + GPT-2 features; Binoculars is too slow for its training set).
+_FEATURES_ONLY = ("bino_observer", "bino_performer", "bino_max_tokens", "bino_batch_size",
+                  "bino_quantization")
 
 
 def make_scorer(spec: str, seed: int = 0, **options: Any) -> Any:
@@ -385,9 +389,11 @@ def make_scorer(spec: str, seed: int = 0, **options: Any) -> Any:
     joblib:PATH | features | features-nolm | features-rf | features-nolm-rf |
     transformer | transformer-text | transformer-chunks.
 
-    `options` go to `FeatureModel` (cache_dir, lm_model, lm_batch_size, ...)
-    and `TransformerModel` (also model_name, max_length, epochs, batch_size)
-    and are ignored by the other scorers; None values are dropped.
+    `options` go to `FeatureModel` (cache_dir, lm_model, lm_batch_size, ...,
+    also bino_observer, bino_performer, bino_max_tokens, bino_batch_size,
+    bino_quantization) and `TransformerModel` (also model_name, max_length,
+    epochs, batch_size) and are ignored by the other scorers; None values are
+    dropped.
     """
     kwargs = {k: v for k, v in options.items() if v is not None}
     if spec == "length":
@@ -402,7 +408,8 @@ def make_scorer(spec: str, seed: int = 0, **options: Any) -> Any:
     if spec in TRANSFORMER_SPECS:
         from skolfie.models.transformer_model import TransformerModel
 
-        return TransformerModel(**TRANSFORMER_SPECS[spec], seed=seed, **kwargs)
+        transformer_kwargs = {k: v for k, v in kwargs.items() if k not in _FEATURES_ONLY}
+        return TransformerModel(**TRANSFORMER_SPECS[spec], seed=seed, **transformer_kwargs)
     if spec == "ensemble":
         return AIDetectorAdapter(random_state=seed)
     if spec.startswith("ensemble:"):
