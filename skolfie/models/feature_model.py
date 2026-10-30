@@ -9,6 +9,10 @@ Features (one row per text):
     lm_*      GPT-2 perplexity, burstiness and token-rank features
               (`skolfie.features.lm`; optional, needs torch + transformers,
               practical only on a GPU for a full corpus)
+    bino_*    Binoculars features (Hans et al. 2024) from a modern observer /
+              performer LM pair, e.g. Qwen2.5-1.5B + -Instruct
+              (`skolfie.features.binoculars`; optional and off by default,
+              `bino_observer=...` turns it on; needs a GPU)
     delta_*   Cosine/Burrows Delta distances to the human and AI word
               profiles (`skolfie.features.delta_features`)
 
@@ -27,9 +31,15 @@ Delta features out-of-fold (`delta_folds` folds, each scored by profiles
 fitted on the other folds) and fits the final profiles on the whole split
 only for scoring new texts. The style and LM features do not use labels.
 
-Speed: style and LM features are cached on disk by text hash when
-`cache_dir` is given (see `skolfie.features.cache`), so a second run over
-the same corpus only refits the Delta step and the classifier.
+Speed: style, LM and Binoculars features are cached on disk by text hash
+when `cache_dir` is given (see `skolfie.features.cache`), so a second run
+over the same corpus only refits the Delta step and the classifier.
+
+`base_features()` (style + GPT-2) is what the transformer model and the
+fairness evaluation reuse; it never includes the Binoculars columns, which
+are too slow to compute for a transformer's whole training set. They are
+appended after it only inside this model (`featurize`, `fit`). Models
+pickled before Binoculars existed load with it off (`__setstate__`).
 
 The scorer interface matches `skolfie.models.baselines` (fit /
 predict_proba / params), plus `feature_importance()`, which the evaluation
@@ -51,6 +61,7 @@ from skolfie.robust.normalize import normalize_for_scoring
 # on-disk caches are rebuilt.
 STYLE_CACHE_VERSION = 1
 LM_CACHE_VERSION = 1
+BINO_CACHE_VERSION = 1
 CLASSIFIERS = ("lgbm", "rf")
 # Share of the training rows held out to pick the number of LightGBM trees.
 LGBM_EARLY_STOP_FRACTION = 0.05
@@ -78,11 +89,20 @@ class FeatureModel:
                  lm_device: str | None = None, delta_words: int = 300, delta_folds: int = 5,
                  cache_dir: str | os.PathLike[str] | None = None, n_jobs: int = -1,
                  seed: int = 0, lgbm_params: dict[str, Any] | None = None,
-                 log: Callable[[str], None] = print) -> None:
+                 log: Callable[[str], None] = print, bino_observer: str | None = None,
+                 bino_performer: str | None = None, bino_max_tokens: int = 256,
+                 bino_batch_size: int = 8, bino_quantization: str | None = None) -> None:
+        from skolfie.features.binoculars import QUANTIZATIONS
+
         if classifier not in CLASSIFIERS:
             raise ValueError(f"classifier must be one of {CLASSIFIERS}, got {classifier!r}")
         if delta_folds < 2:
             raise ValueError("delta_folds must be at least 2")
+        if bino_quantization and bino_quantization not in QUANTIZATIONS:
+            raise ValueError(f"bino_quantization must be one of {QUANTIZATIONS} or None, "
+                             f"got {bino_quantization!r}")
+        if bino_performer and not bino_observer:
+            raise ValueError("bino_performer needs a bino_observer")
         self.classifier = classifier
         self.use_lm = use_lm
         self.lm_model = lm_model
@@ -96,33 +116,63 @@ class FeatureModel:
         self.seed = seed
         self.lgbm_params = dict(lgbm_params or {})
         self.log = log
-        self.name = "features" + ("" if use_lm else "-nolm") + ("-rf" if classifier == "rf" else "")
+        # "" (e.g. an empty notebook setting) means off, like None.
+        self.bino_observer = bino_observer or None
+        self.bino_performer = bino_performer or None
+        self.bino_max_tokens = bino_max_tokens
+        self.bino_batch_size = bino_batch_size
+        self.bino_quantization = bino_quantization or None
+        # Display only (reports, logs): files are found by the names callers give them.
+        self.name = ("features" + ("" if use_lm else "-nolm")
+                     + ("-rf" if classifier == "rf" else "")
+                     + ("+bino" if self.bino_observer else ""))
         self.feature_names_: list[str] = []
         self.delta_: Any = None
         self.clf: Any = None
         self.best_iteration_: int | None = None
         self._lm: Any = None
+        self._bino: Any = None
         self._caches: dict[str, Any] = {}
 
     # ------------------------------------------------------------------ #
-    # Pickling: drop the GPT-2 weights and the caches (reloaded lazily).
+    # Pickling: drop the LM weights and the caches (reloaded lazily).
     # ------------------------------------------------------------------ #
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state["_lm"] = None
+        state["_bino"] = None
         state["_caches"] = {}
         state["log"] = print
         return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # Models saved before the Binoculars features existed: off.
+        for key, default in (("bino_observer", None), ("bino_performer", None),
+                             ("bino_max_tokens", 256), ("bino_batch_size", 8),
+                             ("bino_quantization", None), ("_bino", None)):
+            state.setdefault(key, default)
+        self.__dict__.update(state)
 
     def params(self) -> dict[str, Any]:
         out = {k: getattr(self, k) for k in (
             "classifier", "use_lm", "delta_words", "delta_folds", "seed")}
         if self.use_lm:
             out.update(lm_model=self.lm_model, lm_max_tokens=self.lm_max_tokens)
+        if self.bino_observer:
+            out.update(bino_observer=self.bino_observer, bino_performer=self.bino_performer,
+                       bino_max_tokens=self.bino_max_tokens,
+                       bino_quantization=self.bino_quantization)
         if self.classifier == "lgbm":
             out.update(lgbm=self._lgbm_kwargs(), best_iteration=self.best_iteration_)
         out["n_features"] = len(self.feature_names_)
         return out
+
+    def language_models(self) -> dict[str, Any]:
+        """Which language models score a text: {lm, bino_observer, bino_performer, ...}."""
+        return {"lm": self.lm_model if self.use_lm else None,
+                "bino_observer": self.bino_observer, "bino_performer": self.bino_performer,
+                "bino_quantization": self.bino_quantization,
+                "bino_max_tokens": self.bino_max_tokens if self.bino_observer else None}
 
     # ------------------------------------------------------------------ #
     # Features
@@ -157,10 +207,29 @@ class FeatureModel:
         cache = self._cache("lm", name, LM_FEATURES)
         return cache.compute(texts, lambda chunk: lm.features(chunk, progress=True))
 
+    def _bino_featurizer(self) -> Any:
+        if self._bino is None:
+            from skolfie.features.binoculars import BinocularsFeaturizer
+
+            self._bino = BinocularsFeaturizer(
+                observer=self.bino_observer, performer=self.bino_performer,
+                max_tokens=self.bino_max_tokens, batch_size=self.bino_batch_size,
+                device=self.lm_device, quantization=self.bino_quantization)
+        return self._bino
+
+    def _bino_features(self, texts: list[str]) -> np.ndarray:
+        from skolfie.features.binoculars import BINO_FEATURES
+
+        bino = self._bino_featurizer()
+        name = f"bino-v{BINO_CACHE_VERSION}-{bino.cache_key}".replace("/", "_")
+        cache = self._cache("bino", name, BINO_FEATURES)
+        return cache.compute(texts, lambda chunk: bino.features(chunk, progress=True))
+
     def base_features(self, texts: Sequence[str]) -> tuple[np.ndarray, list[str]]:
         """(style [+ LM] feature matrix, names): the label-free features, cached.
 
-        Needs no fitting; the transformer model (step 5) reuses it.
+        Needs no fitting; the transformer model (step 5) reuses it. Never
+        includes the Binoculars columns (see `_model_features`).
         """
         return self._base_features(scoring_texts(texts))
 
@@ -174,6 +243,16 @@ class FeatureModel:
             blocks.append(self._lm_features(texts))
             names += list(LM_FEATURES)
         return np.hstack(blocks).astype(np.float32), names
+
+    def _model_features(self, texts: list[str]) -> tuple[np.ndarray, list[str]]:
+        """Base features plus, when `bino_observer` is set, the Binoculars columns."""
+        base, names = self._base_features(texts)
+        if not self.bino_observer:
+            return base, names
+        from skolfie.features.binoculars import BINO_FEATURES
+
+        return (np.hstack([base, self._bino_features(texts)]).astype(np.float32),
+                names + list(BINO_FEATURES))
 
     def _new_delta(self) -> Any:
         from skolfie.features.delta_features import DeltaFeaturizer
@@ -197,7 +276,7 @@ class FeatureModel:
         if self.delta_ is None:
             raise RuntimeError("FeatureModel is not fitted")
         texts = scoring_texts(texts)
-        base, _ = self._base_features(texts)
+        base, _ = self._model_features(texts)
         return np.hstack([base, self.delta_.transform(texts)])
 
     # ------------------------------------------------------------------ #
@@ -251,7 +330,7 @@ class FeatureModel:
             raise ValueError("texts and labels must have the same length")
         if np.unique(y).size < 2:
             raise ValueError("need both human and ai training texts")
-        base, names = self._base_features(texts)
+        base, names = self._model_features(texts)
         self.log(f"[fit] Delta features, {self.delta_folds}-fold out-of-fold")
         oof = self._oof_delta(texts, y)
         self.delta_ = self._new_delta().fit(texts, y)

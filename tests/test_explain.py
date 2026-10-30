@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from skolfie.explain.reasons import REASONS, lookup, matches_typical, reason, value_side
+from skolfie.features.binoculars import BINO_FEATURES
 from skolfie.features.delta_features import DELTA_FEATURES
 from skolfie.features.lm import LM_FEATURES
 from skolfie.features.style import STYLE_FEATURES
@@ -28,7 +29,7 @@ from skolfie.robust.normalize import obfuscation_note, obfuscation_stats
 from tests.test_evaluate import make_corpus, make_splits
 from tests.test_stacker import _load_script
 
-ALL_FEATURES = (*STYLE_FEATURES, *LM_FEATURES, *DELTA_FEATURES)
+ALL_FEATURES = (*STYLE_FEATURES, *LM_FEATURES, *BINO_FEATURES, *DELTA_FEATURES)
 CHUNKER = partial(chunk_spans, target_words=20, min_words=8)
 
 

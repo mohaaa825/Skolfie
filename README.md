@@ -124,11 +124,23 @@ essays by Gemini Flash / Flash-Lite models on 27 school topics.
    `python scripts/import_claude_essays.py --plan plan.json --essays-dir essays/ --out-dir data/raw/fresh`
    (idempotent; reports per-model counts of missing, empty and too-short files). Put such files
    in `My Drive/skolfie/data/raw/fresh/` to use them instead of the repo copies.
-2. Run [`notebooks/retrain_modern.ipynb`](notebooks/retrain_modern.ipynb) on a T4 (about 1.5-2
+2. Run [`notebooks/retrain_modern.ipynb`](notebooks/retrain_modern.ipynb) on a T4 (about 2.5-4
    hours). It builds a new corpus in `data/processed_modern/`, makes splits with
-   `configs/splits_modern.json`, retrains the feature model, the transformer and the stacked
+   `configs/splits_modern.json`, retrains the feature model (with Binoculars features, see
+   below), the transformer and the stacked
    model into `My Drive/skolfie/models_modern/` (the old corpus and models stay), and prints
    the Claude recall at the stacked cut-off and the false-positive rate on PERSUADE test essays.
+
+The notebook's feature model adds Binoculars features from a modern LM pair
+(`BINO_OBSERVER = "Qwen/Qwen2.5-1.5B"`, `BINO_PERFORMER = "Qwen/Qwen2.5-1.5B-Instruct"`, fp16,
+~6 GB, fits a free T4), because GPT-2 small (2019) is the only other LM signal. The pair is
+roughly 10x slower than GPT-2 (an estimated 0.05-0.1 s per text on a T4 at 256 tokens), so that
+model trains on `FEATURES_MAX_TRAIN = 40000` texts and scores at most `FEATURES_MAX_EVAL = 5000`
+per evaluation split, with `evaluate.py --keep-sources fresh,persuade` making sure no PERSUADE
+or Claude/Gemini essay is ever sampled away (the report's `sampling` block records the kept
+rows). `BINO_OBSERVER = ""` turns it off. A commented alternative in the settings uses
+`Qwen/Qwen3.8-27B` observer-only in 4-bit (`BINO_QUANTIZATION = "4bit"`, bitsandbytes; Colab
+Pro L4 or A100, about 0.3-1 s per text), with 12,000 train and 3,000 texts per split.
 
 `configs/splits_modern.json` holds out `claude-haiku-5-5` (its own family), so its recall
 measures a Claude model never trained on, next to Opus/Sonnet test essays. Its
@@ -195,6 +207,36 @@ stores the style and GPT-2 features by text hash, so a re-run only refits
 the classifier. The report card adds a feature-importance table. In Colab
 use [`notebooks/feature_baseline.ipynb`](notebooks/feature_baseline.ipynb)
 on a T4 GPU runtime.
+
+**Binoculars features (optional, off by default).** `--bino-observer` adds five
+`bino_*` features (`skolfie/features/binoculars.py`) from a pair of modern
+causal LMs with the same tokenizer, following Binoculars (Hans et al. 2024,
+"Spotting LLMs With Binoculars", ICML): the observer's log-perplexity and its
+token-level spread, the performer's log-perplexity, the cross-perplexity
+(how surprised the performer is by the observer's next-token distribution)
+and the Binoculars score, the performer's log-perplexity divided by the
+cross-perplexity (low = AI), oriented as in the authors' reference code. Dividing by the cross-perplexity corrects for prompts that make any
+continuation predictable, which plain perplexity mistakes for AI text.
+
+```bash
+python scripts/evaluate.py ... --model features --cache-dir data/cache \
+    --bino-observer Qwen/Qwen2.5-1.5B --bino-performer Qwen/Qwen2.5-1.5B-Instruct \
+    --max-train 40000 --keep-sources fresh,persuade
+```
+
+Costs: the Qwen2.5-1.5B pair needs ~6 GB in fp16 (a free T4 is enough) and
+roughly 0.05-0.1 s per text at 256 tokens (`--bino-max-tokens`), about 10x
+GPT-2, so train on a sample (`--max-train`, `--keep-sources` keeps the
+modern essays). Without `--bino-performer` only the observer runs and the
+cross-perplexity, score and performer columns are empty (NaN), e.g. for
+`--bino-observer Qwen/Qwen3.8-27B --bino-quantization 4bit` (bitsandbytes,
+a 24 GB+ GPU, roughly 0.3-1 s per text; a new model family may need
+`pip install -U transformers`). The features are cached like the GPT-2 ones
+(the cache name holds both model ids, the truncation and the quantization),
+the model weights are never pickled, and the transformer keeps using only
+the style + GPT-2 features. The saved model loads the pair on its first
+check, so the app then needs a GPU with enough memory too; `Detector.info()`
+(`skolfie/service.py`) lists the language models in use and says so in its notes.
 
 ### Transformer + features model (roadmap step 5)
 
@@ -442,6 +484,7 @@ skolfie/
 │   │   ├── burrows_delta.py       # Burrows' Delta (function-word z-score distance)
 │   │   ├── style.py               # ~40 length-normalised style features (feature model)
 │   │   ├── lm.py                  # GPT-2 perplexity / burstiness / token-rank features
+│   │   ├── binoculars.py          # Binoculars features from a modern observer/performer LM pair
 │   │   ├── delta_features.py      # Vectorised Cosine/Burrows Delta features
 │   │   └── cache.py               # On-disk feature cache keyed by text hash
 │   ├── models/

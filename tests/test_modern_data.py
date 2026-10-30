@@ -503,3 +503,100 @@ def test_evaluate_cli_oversample(tmp_path: Path, capsys) -> None:
         evaluate.main([*args, "--out-dir", str(tmp_path / "bad"), "--oversample", "fresh=0"])
     with pytest.raises(ValueError, match="no train rows"):
         evaluate.main([*args, "--out-dir", str(tmp_path / "bad"), "--oversample", "nope=2"])
+
+
+# --------------------------------------------------------------------------- #
+# --keep-sources: sampling never drops the modern essays
+# --------------------------------------------------------------------------- #
+def _keep_frame(n_old: int = 200) -> pd.DataFrame:
+    rows = [{"text": f"fresh {i}", "label": "ai", "source": "fresh"} for i in range(10)]
+    rows += [{"text": f"persuade {i}", "label": "human", "source": "persuade"} for i in range(6)]
+    rows += [{"text": f"old {i}", "label": "ai" if i % 4 else "human", "source": "hc3"}
+             for i in range(n_old)]
+    df = pd.DataFrame(rows)
+    df.index = pd.Index([f"r{i:04d}" for i in range(len(df))])
+    return df
+
+
+def test_sample_keeping() -> None:
+    from skolfie.eval.report import sample_keeping, stratified_sample
+
+    df = _keep_frame()
+    out, kept = sample_keeping(df, 50, seed=0, keep=["fresh", "persuade"])
+    assert len(out) == 50 and kept == {"fresh": 10, "persuade": 6}
+    assert (out["source"] == "fresh").sum() == 10 and (out["source"] == "persuade").sum() == 6
+    rest = out[out["source"] == "hc3"]
+    # The other 34 rows keep the old rows' label mix (3/4 ai), seeded and in index order.
+    assert (rest["label"] == "ai").sum() == round(34 * 0.75)
+    assert out.index.is_monotonic_increasing
+    assert out.index.equals(sample_keeping(df, 50, seed=0, keep=["fresh", "persuade"])[0].index)
+    # No keep list / no sampling needed: exactly stratified_sample, nothing recorded.
+    assert sample_keeping(df, 50, 0)[0].index.equals(stratified_sample(df, 50, 0).index)
+    assert sample_keeping(df, None, 0, keep=["fresh"]) == (df, {})
+    assert sample_keeping(df, 10_000, 0, keep=["fresh"])[1] == {}
+    # The kept rows alone exceed the limit: all of them, nothing else.
+    out, kept = sample_keeping(df, 12, seed=0, keep=["fresh", "persuade"])
+    assert len(out) == 16 and set(out["source"]) == {"fresh", "persuade"}
+    # A source absent from this split is recorded with 0 rows.
+    assert sample_keeping(df, 50, 0, keep=["fresh", "m4gt"])[1] == {"fresh": 10, "m4gt": 0}
+    with pytest.raises(ValueError, match="source"):
+        sample_keeping(df.drop(columns="source"), 50, 0, keep=["fresh"])
+
+
+def test_run_evaluation_keeps_sources_in_train_and_eval() -> None:
+    df = _keep_frame()
+    corpus = df.assign(id=df.index, generator="g", domain="academic")
+    ids = corpus["id"].tolist()
+    split = ["train" if i % 2 else "test" for i in range(len(ids))]
+    splits = pd.DataFrame({"id": ids, "split": split})
+    scorer = _Recorder()
+    report, preds = run_evaluation(scorer, corpus, splits, max_train=20, max_eval=15,
+                                   keep_sources=["persuade", "fresh"], eval_splits=("test",),
+                                   log=lambda _: None)
+    train_ids = set(splits.loc[splits["split"] == "train", "id"])
+    test_ids = set(splits.loc[splits["split"] == "test", "id"])
+    modern = corpus[corpus["source"].isin(["fresh", "persuade"])]
+    assert set(modern.loc[modern["id"].isin(train_ids), "text"]) <= set(scorer.texts)
+    assert len(scorer.texts) == 20
+    assert set(modern.loc[modern["id"].isin(test_ids), "id"]) <= set(preds["id"])
+    assert len(preds) == 15
+    sampling = report["sampling"]
+    assert sampling["keep_sources"] == ["fresh", "persuade"]
+    assert sampling["kept_rows"] == {"train": {"fresh": 5, "persuade": 3},
+                                     "test": {"fresh": 5, "persuade": 3}}
+    with pytest.raises(ValueError, match="not in the corpus"):
+        run_evaluation(_Recorder(), corpus, splits, max_train=20, keep_sources=["frsh"],
+                       eval_splits=("test",), log=lambda _: None)
+
+
+def test_evaluate_cli_keep_sources(tmp_path: Path, capsys) -> None:
+    evaluate = _script("evaluate")
+    assert evaluate.parse_keep_sources(["fresh, persuade", "fresh", "x,"]) == [
+        "fresh", "persuade", "x"]
+    df = _keep_frame(n_old=60)
+    corpus = df.assign(id=df.index, generator="g", domain="academic", subdomain="s",
+                       split_hint="", n_words=2)
+    corpus.to_parquet(tmp_path / "corpus.parquet", index=False)
+    split = ["train" if i % 3 else "test" for i in range(len(corpus))]
+    pd.DataFrame({"id": corpus["id"], "split": split}).to_parquet(tmp_path / "splits.parquet",
+                                                                  index=False)
+    args = ["--corpus", str(tmp_path / "corpus.parquet"), "--splits",
+            str(tmp_path / "splits.parquet"), "--model", "length"]
+    assert evaluate.main([*args, "--out-dir", str(tmp_path / "r"), "--max-train", "20",
+                          "--max-eval", "12", "--keep-sources", "fresh,persuade"]) == 0
+    report = json.loads((tmp_path / "r" / "report.json").read_text())
+    kept = report["sampling"]["kept_rows"]
+    n_train = {s: sum(1 for i, src in enumerate(corpus["source"]) if src == s and i % 3)
+               for s in ("fresh", "persuade")}
+    assert kept["train"] == n_train and report["train"]["n"] == 20
+    assert "always kept: fresh, persuade" in (tmp_path / "r" / "report.md").read_text()
+    capsys.readouterr()
+    with pytest.raises(SystemExit):  # a typo must not silently sample the essays away
+        evaluate.main([*args, "--out-dir", str(tmp_path / "bad"), "--max-train", "20",
+                       "--keep-sources", "frsh"])
+    with pytest.raises(SystemExit):  # Binoculars is for the feature models only
+        evaluate.main([*args[:-1], "transformer", "--out-dir", str(tmp_path / "bad"),
+                       "--bino-observer", "Qwen/Qwen2.5-1.5B"])
+    with pytest.raises(SystemExit):
+        evaluate.main([*args, "--out-dir", str(tmp_path / "bad"),
+                       "--bino-performer", "Qwen/Qwen2.5-1.5B-Instruct"])
