@@ -14,13 +14,15 @@ For each token t (given its prefix) we record
 
     * obs NLL   = -log p_obs(t | prefix)
     * perf NLL  = -log p_perf(t | prefix)
-    * cross     = -sum_v p_perf(v | prefix) * log p_obs(v | prefix)
-                  (cross-entropy of the observer against the performer's
-                  next-token distribution: softmax(performer logits) against
-                  log_softmax(observer logits), as in the paper)
+    * cross     = -sum_v p_obs(v | prefix) * log p_perf(v | prefix)
+                  (cross-entropy of the performer against the observer's
+                  next-token distribution: softmax(observer logits) against
+                  log_softmax(performer logits), as in the authors' reference
+                  code, github.com/ahans30/Binoculars)
 
-and aggregate them into `BINO_FEATURES`. The Binoculars score is
-log-perplexity divided by cross-perplexity: perplexity alone flags any
+and aggregate them into `BINO_FEATURES`. The Binoculars score is the
+performer's log-perplexity divided by the cross-perplexity (again as in the
+reference code): perplexity alone flags any
 "predictable" text, while dividing by how surprising one LM finds the other
 LM's guesses calibrates for prompts that make any continuation predictable.
 Low scores mean AI text. Without a performer ("observer-only mode") the
@@ -76,10 +78,10 @@ BINO_FEATURES: tuple[str, ...] = (
 BINO_DESCRIPTIONS: dict[str, str] = {
     "bino_obs_log_ppl": "Average surprise per token of a modern language model (the observer's "
     "log-perplexity); AI text is usually less surprising.",
-    "bino_x_ppl": "How surprised the observer model is by a second, chat-tuned model's guesses "
-    "for each next word (cross-perplexity); it measures how predictable the text's "
-    "context makes any continuation.",
-    "bino_score": "Binoculars score: the observer's surprise divided by the cross-perplexity. "
+    "bino_x_ppl": "How surprised a chat-tuned model is by a base model's guesses for each "
+    "next word (cross-perplexity); it measures how predictable the text's context makes any "
+    "continuation.",
+    "bino_score": "Binoculars score: the chat model's surprise divided by the cross-perplexity. "
     "Low values are typical of AI text, even for prompts that make any answer predictable.",
     "bino_perf_log_ppl": "Average surprise per token of the chat-tuned (performer) model; "
     "AI text is usually very predictable to a chat model.",
@@ -121,8 +123,8 @@ def _bino_token_stats(
     perf_logp = torch.log_softmax(perf_logits.float(), dim=-1)
     perf_nll = -perf_logp.gather(-1, tgt).squeeze(-1)
     # -inf log-probabilities times 0 would give NaN.
-    obs_logp.clamp_(min=torch.finfo(obs_logp.dtype).min)
-    cross = -(perf_logp.exp() * obs_logp).sum(dim=-1)
+    perf_logp.clamp_(min=torch.finfo(perf_logp.dtype).min)
+    cross = -(obs_logp.exp() * perf_logp).sum(dim=-1)
     return obs_nll, cross, perf_nll
 
 
@@ -137,9 +139,10 @@ def _aggregate(obs_nll: np.ndarray, cross: np.ndarray | None,
     row[_IDX["bino_obs_nll_std"]] = obs.std()
     if cross is not None and perf_nll is not None:
         x_ppl = float(cross.astype(np.float64).mean())
+        perf_log_ppl = float(perf_nll.astype(np.float64).mean())
         row[_IDX["bino_x_ppl"]] = x_ppl
-        row[_IDX["bino_score"]] = obs.mean() / x_ppl if x_ppl > 0 else np.nan
-        row[_IDX["bino_perf_log_ppl"]] = perf_nll.astype(np.float64).mean()
+        row[_IDX["bino_score"]] = perf_log_ppl / x_ppl if x_ppl > 0 else np.nan
+        row[_IDX["bino_perf_log_ppl"]] = perf_log_ppl
     return row
 
 

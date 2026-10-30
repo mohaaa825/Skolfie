@@ -213,9 +213,9 @@ on a T4 GPU runtime.
 causal LMs with the same tokenizer, following Binoculars (Hans et al. 2024,
 "Spotting LLMs With Binoculars", ICML): the observer's log-perplexity and its
 token-level spread, the performer's log-perplexity, the cross-perplexity
-(how surprised the observer is by the performer's next-token distribution)
-and the Binoculars score, log-perplexity divided by cross-perplexity (low =
-AI). Dividing by the cross-perplexity corrects for prompts that make any
+(how surprised the performer is by the observer's next-token distribution)
+and the Binoculars score, the performer's log-perplexity divided by the
+cross-perplexity (low = AI), oriented as in the authors' reference code. Dividing by the cross-perplexity corrects for prompts that make any
 continuation predictable, which plain perplexity mistakes for AI text.
 
 ```bash

@@ -112,9 +112,9 @@ def by_hand(torch, pair, text: str) -> dict[str, float]:
     tgt = torch.tensor(ids)
     obs_nll = -lo[torch.arange(len(ids)), tgt]
     perf_nll = -lp[torch.arange(len(ids)), tgt]
-    x = -(lp.exp() * lo).sum(-1)
+    x = -(lo.exp() * lp).sum(-1)
     return {"bino_obs_log_ppl": obs_nll.mean().item(), "bino_x_ppl": x.mean().item(),
-            "bino_score": (obs_nll.mean() / x.mean()).item(),
+            "bino_score": (perf_nll.mean() / x.mean()).item(),
             "bino_perf_log_ppl": perf_nll.mean().item(),
             "bino_obs_nll_std": obs_nll.std(unbiased=False).item()}
 
@@ -171,10 +171,11 @@ def test_token_stats_on_tiny_logits(torch) -> None:
     lo, lp = torch.log_softmax(obs, -1), torch.log_softmax(perf, -1)
     torch.testing.assert_close(obs_nll, -lo[[0, 1], tgt], atol=2e-3, rtol=0)
     torch.testing.assert_close(perf_nll, -lp[[0, 1], tgt], atol=2e-3, rtol=0)
-    torch.testing.assert_close(cross, -(lp.exp() * lo).sum(-1), atol=2e-3, rtol=0)
+    torch.testing.assert_close(cross, -(lo.exp() * lp).sum(-1), atol=2e-3, rtol=0)
     assert obs_nll.dtype == cross.dtype == perf_nll.dtype == torch.float32
-    # Uniform observer: the cross-entropy is log(vocab) whatever the performer says.
-    assert cross[1].item() == pytest.approx(np.log(3), abs=1e-3)
+    # Uniform performer: the cross-entropy is log(vocab) whatever the observer says.
+    flat = _bino_token_stats(obs, torch.zeros(2, 3), tgt)[1]
+    torch.testing.assert_close(flat, torch.full((2,), float(np.log(3))), atol=1e-4, rtol=0)
     # Observer-only.
     solo = _bino_token_stats(obs, None, tgt)
     assert solo[1] is None and solo[2] is None
@@ -185,10 +186,10 @@ def test_token_stats_on_tiny_logits(torch) -> None:
                                rtol=0)
 
 
-def test_aggregate_score_is_log_ppl_over_x_ppl() -> None:
+def test_aggregate_score_is_perf_log_ppl_over_x_ppl() -> None:
     row = _aggregate(np.array([1.0, 3.0]), np.array([2.0, 2.0]), np.array([0.5, 0.5]))
     assert row[col("bino_obs_log_ppl")] == 2.0 and row[col("bino_x_ppl")] == 2.0
-    assert row[col("bino_score")] == 1.0 and row[col("bino_perf_log_ppl")] == 0.5
+    assert row[col("bino_score")] == 0.25 and row[col("bino_perf_log_ppl")] == 0.5
     assert row[col("bino_obs_nll_std")] == 1.0
     assert np.isnan(_aggregate(np.zeros(0), np.zeros(0), np.zeros(0))).all()
     solo = _aggregate(np.array([1.0, 3.0]), None, None)
@@ -206,7 +207,7 @@ def test_features_match_hand_computation(torch, pair) -> None:
         for name, value in expected.items():
             assert X[i, col(name)] == pytest.approx(value, rel=1e-4, abs=1e-4), (text, name)
     np.testing.assert_allclose(X[:, col("bino_score")],
-                               X[:, col("bino_obs_log_ppl")] / X[:, col("bino_x_ppl")],
+                               X[:, col("bino_perf_log_ppl")] / X[:, col("bino_x_ppl")],
                                rtol=1e-5)
 
 
