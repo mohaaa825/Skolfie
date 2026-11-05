@@ -23,10 +23,13 @@ dependencies = [
 skolfie = "skolfie.cli:main"
 
 [project.optional-dependencies]
-app = ["gradio>=4"]
+# sentencepiece + protobuf: the DeBERTa-v3 tokenizer (a SentencePiece model) for the
+# transformer backbone; a pickled model reloads from its saved tokenizer.json.
+app = ["gradio>=4", "sentencepiece>=0.1.99", "protobuf>=3.20"]
 data = ["huggingface_hub>=0.20", "gdown>=5"]
 generate = ["requests>=2.31"]
-features = ["lightgbm>=4", "torch>=2.1", "transformers>=4.40"]
+features = ["lightgbm>=4", "torch>=2.1", "transformers>=4.40", "sentencepiece>=0.1.99",
+            "protobuf>=3.20"]
 dev = ["pytest", "ruff", "lightgbm>=4"]
 
 [tool.setuptools.packages.find]

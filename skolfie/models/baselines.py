@@ -22,7 +22,7 @@ Scorers:
                        models plug in without touching the harness
 
 The feature model (roadmap step 4) lives in `skolfie.models.feature_model`
-and the DistilBERT + features model (step 5) in
+and the DistilBERT (or DeBERTa-v3) + features model (step 5) in
 `skolfie.models.transformer_model`; `make_scorer` builds them for the
 `features*` and `transformer*` specs.
 
@@ -376,7 +376,8 @@ TRANSFORMER_SPECS = {
     "transformer-chunks": {"use_features": True, "chunk_augment": 1},
 }
 # make_scorer options that only the transformer model takes.
-_TRANSFORMER_ONLY = ("model_name", "max_length", "epochs", "batch_size")
+_TRANSFORMER_ONLY = ("model_name", "max_length", "epochs", "batch_size", "grad_accum", "lr",
+                     "precision", "gradient_checkpointing")
 # make_scorer options that only the feature model takes (the transformer keeps
 # its own style + GPT-2 features; Binoculars is too slow for its training set).
 _FEATURES_ONLY = ("bino_observer", "bino_performer", "bino_max_tokens", "bino_batch_size",
@@ -391,9 +392,10 @@ def make_scorer(spec: str, seed: int = 0, **options: Any) -> Any:
 
     `options` go to `FeatureModel` (cache_dir, lm_model, lm_batch_size, ...,
     also bino_observer, bino_performer, bino_max_tokens, bino_batch_size,
-    bino_quantization) and `TransformerModel` (also model_name, max_length,
-    epochs, batch_size) and are ignored by the other scorers; None values are
-    dropped.
+    bino_quantization) and `TransformerModel` (also model_name, e.g.
+    microsoft/deberta-v3-large, max_length, epochs, batch_size, grad_accum,
+    lr, precision, gradient_checkpointing) and are ignored by the other
+    scorers; None values are dropped.
     """
     kwargs = {k: v for k, v in options.items() if v is not None}
     if spec == "length":

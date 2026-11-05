@@ -5,6 +5,9 @@ Roadmap step 5: the DistilBERT + features TransformerModel. huggingface.co
 may be unreachable, so a tiny DistilBERT and a WordPiece tokenizer trained
 on the synthetic corpus are built locally and injected; the features path
 uses the style features only (use_lm=False), so GPT-2 is never needed.
+Large-backbone support is checked with a tiny random DeBERTa-v2 model
+(precision resolution needs no GPU; a SentencePiece tokenizer is trained
+locally when `sentencepiece` is installed).
 """
 
 from __future__ import annotations
@@ -431,3 +434,275 @@ def test_transformer_with_a_bino_feature_model_uses_base_features_only(tokenizer
     model.fit(train["text"].tolist(), train["label"].tolist())
     assert not any(n.startswith("bino_") for n in model.feature_names_)
     assert model.predict_proba(test["text"].tolist()[:4]).shape == (4,)
+
+
+# --------------------------------------------------------------------------- #
+# Precision, large backbones (DeBERTa-v3), gradient checkpointing
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("requested, device, bf16, expected", [
+    ("auto", "cuda", True, "bf16"),     # A100, L4
+    ("auto", "cuda", False, "fp16"),    # T4
+    ("auto", "cpu", False, "fp32"),
+    ("fp16", "cuda", True, "fp16"),
+    ("bf16", "cuda", True, "bf16"),
+    ("bf16", "cuda", False, "fp32"),    # no bf16 on this GPU: exact fallback
+    ("fp32", "cuda", True, "fp32"),
+    ("fp16", "cpu", False, "fp32"),
+    ("bf16", "cpu", True, "fp32"),
+])
+def test_resolve_precision(requested, device, bf16, expected) -> None:
+    from skolfie.models.transformer_model import resolve_precision
+
+    logs: list[str] = []
+    assert resolve_precision(requested, device, bf16, "distilbert-base-cased",
+                             log=logs.append) == expected
+    assert not any("DeBERTa" in m for m in logs)
+    if requested == "bf16" and device == "cuda" and not bf16:
+        assert any("does not support bf16" in m for m in logs)
+
+
+def test_deberta_in_fp16_warns() -> None:
+    from skolfie.models.transformer_model import resolve_precision
+
+    logs: list[str] = []
+    assert resolve_precision("auto", "cuda", False, "microsoft/deberta-v3-large",
+                             log=logs.append) == "fp16"
+    assert any("WARNING" in m and "DeBERTa" in m for m in logs)
+    logs.clear()  # found by the backbone's model_type too, e.g. an injected one
+    assert resolve_precision("fp16", "cuda", True, "x", "deberta-v2", log=logs.append) == "fp16"
+    assert logs
+    logs.clear()
+    assert resolve_precision("auto", "cuda", True, "microsoft/deberta-v3-large",
+                             log=logs.append) == "bf16"
+    assert not logs
+
+
+def test_requested_precision_and_the_legacy_fp16_flag() -> None:
+    from skolfie.models.transformer_model import requested_precision
+
+    assert requested_precision(None, None) == "auto"
+    assert requested_precision(None, True) == "fp16"
+    assert requested_precision(None, False) == "fp32"
+    assert requested_precision("BF16", True) == "bf16"  # precision wins
+    with pytest.raises(ValueError, match="precision"):
+        requested_precision("int8", None)
+    assert TransformerModel(fp16=True).precision == "fp16"
+    assert TransformerModel(fp16=False).precision == "fp32"
+    assert TransformerModel().precision == "auto"
+    assert TransformerModel(precision="bf16", fp16=True).precision == "bf16"
+    with pytest.raises(ValueError):
+        TransformerModel(precision="half")
+
+
+@pytest.mark.parametrize("fp16, expected", [(None, "auto"), (True, "fp16"), (False, "fp32")])
+def test_models_pickled_before_precision_load_and_predict(fitted, corpus, fp16,
+                                                          expected) -> None:
+    model, _ = fitted
+    _, test = corpus
+    texts = test["text"].tolist()[:6]
+    state = model.__getstate__()
+    for key in ("precision", "gradient_checkpointing", "backbone_type_", "precision_used_",
+                "_precision"):
+        state.pop(key)
+    state["fp16"] = fp16
+    old = TransformerModel.__new__(TransformerModel)
+    old.__setstate__(state)
+    assert old.precision == expected and old.gradient_checkpointing is False
+    assert old.backbone_type_ == "distilbert"
+    np.testing.assert_allclose(old.predict_proba(texts), model.predict_proba(texts), atol=1e-6)
+    assert old._precision == "fp32"  # CPU
+    assert old.params()["precision"] == expected
+
+
+def test_params_record_the_backbone_and_precision(fitted) -> None:
+    model, _ = fitted
+    params = model.params()
+    assert model.name == "transformer"
+    assert params["backbone"] == "distilbert"
+    assert params["precision"] == "auto" and params["precision_used"] == "fp32"
+    assert params["gradient_checkpointing"] is False
+
+
+def test_gradient_checkpointing(tokenizer, corpus) -> None:
+    train, test = corpus
+    logs: list[str] = []
+    model = make(tokenizer, log=logs.append, gradient_checkpointing=True, epochs=1)
+    model.fit(train["text"], train["label"])
+    assert model._net["backbone"].is_gradient_checkpointing
+    assert any("gradient checkpointing on" in m for m in logs)
+    assert model.params()["gradient_checkpointing"] is True
+    assert np.isfinite(model.predict_proba(test["text"].tolist()[:4])).all()
+
+
+def test_non_finite_mixed_precision_batch_is_recomputed_in_fp32(fitted, corpus,
+                                                                monkeypatch) -> None:
+    """An fp16 overflow at predict time (DeBERTa on a T4) is redone in float32."""
+    import contextlib
+    import warnings
+
+    model, _ = fitted
+    _, test = corpus
+    texts = test["text"].tolist()[:5]
+    expected = model.predict_proba(texts)
+    forward = model._forward
+    calls = []
+
+    def overflowing(ids, mask, feats):
+        calls.append(1)
+        out = forward(ids, mask, feats)
+        return out * float("nan") if len(calls) == 1 else out
+
+    monkeypatch.setattr(model, "_forward", overflowing)
+    monkeypatch.setattr(model, "_amp", True)
+    monkeypatch.setattr(model, "_autocast", contextlib.nullcontext)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # autocast(cuda) on a CPU-only machine
+        p = model.predict_proba(texts)
+    assert len(calls) == 2
+    np.testing.assert_allclose(p, expected, atol=1e-6)
+
+
+def _tiny_deberta(tokenizer):
+    from transformers import DebertaV2Config, DebertaV2Model
+
+    torch.manual_seed(0)
+    config = DebertaV2Config(vocab_size=len(tokenizer), hidden_size=32, num_hidden_layers=1,
+                             num_attention_heads=2, intermediate_size=64,
+                             max_position_embeddings=128, pad_token_id=tokenizer.pad_token_id,
+                             relative_attention=True, position_buckets=16,
+                             pos_att_type=["p2c", "c2p"], position_biased_input=False,
+                             norm_rel_ebd="layer_norm", share_att_key=True)
+    return DebertaV2Model(config)
+
+
+def test_deberta_backbone_trains_pickles_and_reloads(tokenizer, corpus, tmp_path) -> None:
+    """A (tiny, random) DeBERTa-v2/v3 backbone: first-token pooling, gradient checkpointing,
+    the joblib round trip and the report name."""
+    train, test = corpus
+    model = TransformerModel(backbone=_tiny_deberta(tokenizer), tokenizer=tokenizer,
+                             model_name="microsoft/deberta-v3-large", use_lm=False,
+                             log=lambda m: None, gradient_checkpointing=True,
+                             **{**FAST, "epochs": 2})
+    model.fit(train["text"].tolist(), train["label"].tolist())
+    assert model.name == "transformer"
+    params = model.params()
+    assert params["backbone"] == "deberta-v2"
+    assert params["model_name"] == "microsoft/deberta-v3-large"
+    texts = test["text"].tolist()
+    p = model.predict_proba(texts)
+    assert np.isfinite(p).all() and p.shape == (len(texts),)
+    joblib.dump(model, tmp_path / "transformer.joblib")
+    loaded = joblib.load(tmp_path / "transformer.joblib")
+    np.testing.assert_allclose(loaded.predict_proba(texts), p, atol=1e-6)
+    assert type(loaded._net["backbone"]).__name__ == "DebertaV2Model"
+
+
+def test_sentencepiece_deberta_tokenizer_round_trip(corpus, tmp_path) -> None:
+    """The DeBERTa-v3 tokenizer is a SentencePiece model: loading it needs sentencepiece;
+    the pickled model keeps the converted tokenizer and reloads without the .model file."""
+    spm = pytest.importorskip("sentencepiece")
+    pytest.importorskip("google.protobuf")
+    import io
+
+    from transformers import DebertaV2Tokenizer
+
+    train, test = corpus
+    texts = train["text"].tolist() + test["text"].tolist()
+    buf = io.BytesIO()
+    spm.SentencePieceTrainer.train(
+        sentence_iterator=iter(texts), model_writer=buf, vocab_size=200, hard_vocab_limit=False,
+        model_type="unigram", pad_id=0, bos_id=1, eos_id=2, unk_id=3, pad_piece="[PAD]",
+        bos_piece="[CLS]", eos_piece="[SEP]", unk_piece="[UNK]", user_defined_symbols=["[MASK]"],
+        minloglevel=2)
+    spm_dir = tmp_path / "spm"
+    spm_dir.mkdir()
+    (spm_dir / "spm.model").write_bytes(buf.getvalue())
+    tok = DebertaV2Tokenizer.from_pretrained(spm_dir)
+    ids = tok(texts[:1])["input_ids"][0]
+    assert ids[0] == tok.cls_token_id and tok.unk_token_id not in ids[1:-1]
+
+    model = TransformerModel(backbone=_tiny_deberta(tok), tokenizer=tok, use_lm=False,
+                             log=lambda m: None, **{**FAST, "epochs": 1})
+    model.fit(train["text"].tolist(), train["label"].tolist())
+    p = model.predict_proba(test["text"].tolist())
+    joblib.dump(model, tmp_path / "m.joblib")
+    (spm_dir / "spm.model").unlink()
+    loaded = joblib.load(tmp_path / "m.joblib")
+    np.testing.assert_allclose(loaded.predict_proba(test["text"].tolist()), p, atol=1e-6)
+
+
+def test_make_scorer_passes_transformer_options_through() -> None:
+    from skolfie.models.baselines import make_scorer
+
+    opts = dict(model_name="microsoft/deberta-v3-large", precision="bf16",
+                gradient_checkpointing=True, lr=1e-5, grad_accum=4, batch_size=8,
+                max_length=512, epochs=1)
+    model = make_scorer("transformer", seed=3, **opts)
+    for key, value in opts.items():
+        assert getattr(model, key) == value, key
+    assert model.seed == 3 and model.name == "transformer"
+    # The feature models ignore them (and None values are dropped).
+    features = make_scorer("features-nolm", **opts, cache_dir=None)
+    assert type(features).__name__ == "FeatureModel"
+    assert make_scorer("transformer", precision=None).precision == "auto"
+
+
+def test_evaluate_cli_transformer_options_and_kept_sources(tokenizer, corpus, tmp_path,
+                                                           monkeypatch) -> None:
+    """evaluate.py hands --backbone/--precision/--lr/--grad-accum/--gradient-checkpointing
+    to the transformer, and --max-train keeps every --keep-sources row for it too."""
+    import json
+
+    import pandas as pd
+
+    import skolfie.models.baselines as baselines
+    from tests.test_modern_data import _script
+
+    train, _ = corpus
+    df = train.copy()
+    pos = np.arange(len(df))
+    df["source"] = np.where(pos % 5 == 0, "persuade", "hc3")
+    df.loc[((df["label"] == "ai") & (pos % 3 == 0)).to_numpy(), "source"] = "fresh"
+    df.to_parquet(tmp_path / "corpus.parquet", index=False)
+    split = np.where(pos % 4 == 0, "val", "train")
+    pd.DataFrame({"id": df["id"], "split": split}).to_parquet(tmp_path / "splits.parquet",
+                                                              index=False)
+    seen: dict = {}
+
+    def fake_make_scorer(spec, seed=0, **options):
+        seen.update(spec=spec, **{k: v for k, v in options.items() if v is not None})
+        model = make(tokenizer, epochs=1)
+        fit = model.fit
+
+        def spy(texts, labels):
+            seen["texts"] = list(texts)
+            return fit(texts, labels)
+
+        model.fit = spy
+        return model
+
+    monkeypatch.setattr(baselines, "make_scorer", fake_make_scorer)
+    evaluate = _script("evaluate")
+    args = ["--corpus", str(tmp_path / "corpus.parquet"), "--splits",
+            str(tmp_path / "splits.parquet"), "--model", "transformer"]
+    assert evaluate.main([
+        *args, "--out-dir", str(tmp_path / "r"),
+        "--backbone", "microsoft/deberta-v3-large", "--precision", "bf16", "--lr", "1e-5",
+        "--grad-accum", "4", "--batch-size", "8", "--gradient-checkpointing",
+        "--max-train", "45", "--keep-sources", "fresh,persuade"]) == 0
+    assert seen["spec"] == "transformer"
+    assert (seen["model_name"], seen["precision"], seen["lr"], seen["grad_accum"],
+            seen["batch_size"], seen["gradient_checkpointing"]) == (
+        "microsoft/deberta-v3-large", "bf16", 1e-5, 4, 8, True)
+    kept = df[(split == "train") & df["source"].isin(["fresh", "persuade"]).to_numpy()]
+    assert 5 < len(kept) < 45
+    assert set(kept["text"]) <= set(seen["texts"]) and len(seen["texts"]) == 45
+    report = json.loads((tmp_path / "r" / "report.json").read_text())
+    assert report["sampling"]["kept_rows"]["train"] == {
+        s: int((kept["source"] == s).sum()) for s in ("fresh", "persuade")}
+    assert report["model"]["name"] == "transformer"
+    assert report["model"]["params"]["backbone"] == "distilbert"
+    # Without the flags nothing new is passed (the model keeps its defaults).
+    seen.clear()
+    assert evaluate.main([*args, "--out-dir", str(tmp_path / "r2")]) == 0
+    assert not {"precision", "lr", "grad_accum", "gradient_checkpointing"} & set(seen)
