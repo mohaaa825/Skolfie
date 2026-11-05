@@ -149,6 +149,24 @@ pulling the Opus/Sonnet essays on that assignment out of train (human essays sha
 topics, so a topic is no shortcut); on AI-only college topics the usual group rule still
 applies. Configs without the key keep their hash and `splits_version`.
 
+On a Colab Pro A100 or L4 (>= 22 GB, bf16) the notebook's `BACKBONE = "auto"` trains the
+transformer on **DeBERTa-v3-large** (`microsoft/deberta-v3-large`, 435M parameters) instead of
+DistilBERT: bf16, lr 1e-5, batch 8 x 4 accumulation, 512 tokens, on
+`TRANSFORMER_MAX_TRAIN = 60000` train texts that keep every `fresh` / `persuade` essay
+(estimated 2.5-4.5 h on an A100, about twice that on an L4); on a T4 it keeps DistilBERT and
+says so. The chunk model keeps DistilBERT (`CHUNK_BACKBONE`).
+
+Leave-one-family-out: `scripts/eval_lofo.py` (the notebook's optional `RUN_LOFO` step) holds
+out each model family in turn (`claude`, `claude-haiku`, `gemini`, plus `--families`), adds it
+to the held-out generators of `configs/splits_modern.json`, retrains the feature model on the
+rest (same oversampling; `--model transformer` is possible but slow), sets a cut-off on that
+run's `val` at 1% human FPR (the stacker's rule), and writes `lofo.json` / `lofo.md`: recall
+of the unseen family at that cut-off, its AUROC against the PERSUADE human test essays, its
+mean P(ai), and the PERSUADE false-positive rate. PERSUADE human essays are grouped by their
+own id, so no LOFO run moves one of them out of train (each row records it); a held-out
+family's essays on PERSUADE assignments are detached by `shared_topic_groups`, and its essays
+on AI-only college topics taint only groups of Claude essays (Gemini's topics are its own).
+
 The ~1,300 Claude and Gemini training essays would be lost among 176k older texts, so training
 repeats them: `evaluate.py --oversample fresh=3` (the notebook's setting) repeats every train
 row of corpus source `fresh` 3 times (comma-separated or repeatable, `SOURCE=N`). With 6,000
@@ -246,8 +264,21 @@ features: the [CLS] vector and a small network over the standardised
 features are joined before the final layer (the Annepaka et al. design).
 `transformer-text` drops the features, to measure what they add. Training
 needs a GPU; use [`notebooks/transformer.ipynb`](notebooks/transformer.ipynb)
-on a Colab T4. `--hf-model`, `--max-length`, `--epochs` and `--batch-size`
-change the defaults.
+on a Colab T4. `--backbone` (alias `--hf-model`), `--max-length`, `--epochs`,
+`--batch-size`, `--grad-accum`, `--lr`, `--precision` and
+`--gradient-checkpointing` change the defaults, and `--max-train` with
+`--keep-sources` caps its training set like the feature model's.
+
+Larger backbones: `--backbone microsoft/deberta-v3-large --precision bf16
+--lr 1e-5 --batch-size 8 --grad-accum 4` on an A100 / L4. `--precision auto`
+(the default) is bf16 where the GPU supports it, else fp16 (T4), and fp32 on
+CPU; DeBERTa-v3 tends to overflow to NaN in fp16, so a T4 run warns (a
+prediction batch that overflows is recomputed in fp32). The DeBERTa tokenizer
+needs `sentencepiece` and `protobuf` (in the `features` and `app` extras). The
+saved model is still named `transformer` (`transformer.joblib`, so the
+stacker, the service and the app find it) and its report records the
+backbone. It loads and predicts on CPU and GPU, but a CPU check with the
+435M-parameter model takes a few seconds per essay instead of well under one.
 
 ### Calibrated combiner and verdicts (roadmap step 6)
 
@@ -491,7 +522,7 @@ skolfie/
 │   │   ├── ensemble.py            # AIDetectorModel: the old prototype
 │   │   ├── baselines.py           # Length and TF-IDF baselines, make_scorer()
 │   │   ├── feature_model.py       # FeatureModel: style + GPT-2 + Delta into LightGBM
-│   │   ├── transformer_model.py   # TransformerModel: DistilBERT + features
+│   │   ├── transformer_model.py   # TransformerModel: DistilBERT / DeBERTa-v3 + features
 │   │   └── stacker.py             # Calibrated stack + Human/Uncertain/AI cut-offs
 │   ├── mixed/
 │   │   ├── chunking.py            # Sentence split + ~60-word chunks
@@ -520,6 +551,7 @@ skolfie/
 │   ├── eval_robust.py             # Robustness table per attack
 │   ├── build_fairness_sets.py     # Download + build the external fairness sets
 │   ├── eval_fairness.py           # Human FPR per subgroup + known limitations
+│   ├── eval_lofo.py               # Leave-one-family-out recall + PERSUADE FPR
 │   ├── generate_ai_texts.py       # Fresh AI text from current models
 │   ├── import_claude_essays.py    # Essay .txt files + prompt plan -> fresh JSONL
 │   ├── import_csv_essays.py       # CSV of essays (e.g. Gemini batch) -> fresh JSONL

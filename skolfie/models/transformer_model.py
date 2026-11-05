@@ -21,6 +21,18 @@ them noisily. Only texts with two or more chunks add any, and the held-out
 texts are split off first, so none of their chunks are trained on.
 The default backbone is `distilbert-base-cased`: case, punctuation and stop
 words are kept, since they carry much of the style signal.
+
+Large backbones (`model_name="microsoft/deberta-v3-large"`, 435M parameters,
+Colab Pro A100 / L4): the first-token pooling works unchanged (DeBERTa puts
+[CLS] at position 0); its tokenizer is a SentencePiece model, so the first
+load from the Hub needs the `sentencepiece` and `protobuf` packages (the
+`features` / `app` extras); a pickled model stores the converted
+tokenizer.json and reloads without them. DeBERTa-v3 is known to overflow
+to NaN under fp16, hence bf16 where the GPU has it (`precision`), and
+`gradient_checkpointing=True` trades ~30% speed for much less activation
+memory. The scorer is still named "transformer" (the stacker, the service
+and the notebooks look for `transformer.joblib`); `params()` records the
+backbone.
 fit() and predict_proba() first map every text (and every training chunk)
 through `skolfie.robust.normalize.normalize_for_scoring`, which undoes
 invisible characters and look-alike letters, also for models pickled
@@ -41,9 +53,15 @@ Training (GPU; the loop also runs on CPU, without fp16):
       LayerNorm weights (all 1-D parameters). Linear warmup over
       `warmup_ratio` of the optimisation steps, then linear decay to 0.
       Gradient accumulation (`grad_accum`), gradient clipping at 1.0.
-    * fp16 on CUDA by default: the weights stay float32, the forward pass
-      runs under torch.autocast with a GradScaler (no dtype= / torch_dtype=
-      loading kwargs, which differ between transformers 4.x and 5.x).
+    * Mixed precision on CUDA (`precision`, see `resolve_precision`): "auto"
+      is bf16 where the GPU supports it (A100, L4), else fp16 (T4); "fp16",
+      "bf16" and "fp32" force one. The weights stay float32 and the forward
+      pass runs under torch.autocast; fp16 adds a GradScaler, bf16 needs
+      none (no dtype= / torch_dtype= loading kwargs, which differ between
+      transformers 4.x and 5.x). The old `fp16=True/False` argument still
+      works (precision "fp16" / "fp32") when `precision` is not given. CPU
+      always runs float32. A prediction batch that comes out non-finite
+      under mixed precision is recomputed in float32.
     * Texts are tokenised per batch (head of the text, truncated to
       `max_length` tokens, padded to the longest text in the batch). Batches
       are length-bucketed to cut padding: shuffle, sort by character length
@@ -173,6 +191,55 @@ def _fmt_seconds(s: float) -> str:
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
 
+PRECISIONS = ("auto", "fp16", "bf16", "fp32")
+
+
+def requested_precision(precision: str | None, fp16: bool | None) -> str:
+    """The precision asked for: `precision` if given, else the legacy `fp16` flag
+    (None -> "auto", True -> "fp16", False -> "fp32")."""
+    if precision is None:
+        return "auto" if fp16 is None else ("fp16" if fp16 else "fp32")
+    precision = str(precision).lower()
+    if precision not in PRECISIONS:
+        raise ValueError(f"precision must be one of {PRECISIONS}, got {precision!r}")
+    return precision
+
+
+def is_deberta(model_name: str | None, model_type: str | None = None) -> bool:
+    return "deberta" in f"{model_name or ''} {model_type or ''}".lower()
+
+
+def resolve_precision(requested: str, device_type: str, bf16_supported: bool,
+                      model_name: str | None = None, model_type: str | None = None,
+                      log: Callable[[str], None] = print) -> str:
+    """The precision actually used: "fp16", "bf16" or "fp32".
+
+    Mixed precision is CUDA only. "auto" is bf16 where the GPU supports it,
+    else fp16. A DeBERTa backbone in fp16 gets a warning (it tends to
+    overflow to NaN there); bf16 asked for on a GPU without it falls back to
+    fp32 (exact, slower) rather than to fp16.
+    """
+    requested = requested_precision(requested, None)
+    if device_type != "cuda":
+        if requested in ("fp16", "bf16"):
+            log(f"[transformer] {requested} needs CUDA; running in float32 on {device_type}")
+        return "fp32"
+    if requested == "auto":
+        used = "bf16" if bf16_supported else "fp16"
+    elif requested == "bf16" and not bf16_supported:
+        log("[transformer] WARNING: this GPU does not support bf16; running in float32 "
+            "(slower). Use a GPU with bf16 (A100, L4) or precision='fp16'.")
+        used = "fp32"
+    else:
+        used = requested
+    if used == "fp16" and is_deberta(model_name, model_type):
+        log("[transformer] WARNING: DeBERTa-v3 in fp16 is known to overflow to NaN (loss "
+            "nan, scores stuck); this GPU has no bf16 (e.g. a T4). Prefer a bf16 GPU "
+            "(A100 / L4, Colab Pro), precision='fp32' (about 2-3x slower), or "
+            "distilbert-base-cased on a T4.")
+    return used
+
+
 def _grad_scaler(enabled: bool) -> Any:
     import torch
 
@@ -198,7 +265,8 @@ class TransformerModel:
                  lm_max_tokens: int = 512, lm_batch_size: int = 32, n_jobs: int = -1,
                  seed: int = 0, backbone: Any = None, tokenizer: Any = None,
                  log: Callable[[str], None] = print, lm_device: str | None = None,
-                 chunk_augment: int = 0, chunk_words: int = 60) -> None:
+                 chunk_augment: int = 0, chunk_words: int = 60, precision: str | None = None,
+                 gradient_checkpointing: bool = False) -> None:
         if (backbone is None) != (tokenizer is None):
             raise ValueError("inject both `backbone` and `tokenizer`, or neither")
         for name, value in (("max_length", max_length), ("epochs", epochs),
@@ -229,7 +297,9 @@ class TransformerModel:
         self.eval_fraction = eval_fraction
         self.eval_every = eval_every
         self.device = device
-        self.fp16 = fp16
+        self.fp16 = fp16  # legacy flag; `precision` wins when given
+        self.precision = requested_precision(precision, fp16)
+        self.gradient_checkpointing = bool(gradient_checkpointing)
         self.cache_dir = None if cache_dir is None else os.fspath(cache_dir)
         self.lm_model = lm_model
         self.lm_max_tokens = lm_max_tokens
@@ -264,6 +334,8 @@ class TransformerModel:
         self.n_chunks_ = 0
         self.feature_seconds_: float | None = None
         self.train_seconds_: float | None = None
+        self.backbone_type_: str | None = None
+        self.precision_used_: str | None = None
         # Live objects (never pickled) and their pickled form.
         self._backbone_in = backbone
         self._tokenizer_in = tokenizer
@@ -271,6 +343,7 @@ class TransformerModel:
         self._tokenizer: Any = None
         self._device: Any = None
         self._amp = False
+        self._precision = "fp32"
         self._packed: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------ #
@@ -284,6 +357,7 @@ class TransformerModel:
         for key in ("_backbone_in", "_tokenizer_in", "_net", "_tokenizer", "_device"):
             state[key] = None
         state["_amp"] = False
+        state["_precision"] = "fp32"
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -291,6 +365,12 @@ class TransformerModel:
         state.setdefault("chunk_augment", 0)
         state.setdefault("chunk_words", 60)
         state.setdefault("n_chunks_", 0)
+        # Models saved before `precision` existed: their fp16 flag decides.
+        state.setdefault("precision", requested_precision(None, state.get("fp16")))
+        state.setdefault("gradient_checkpointing", False)
+        state.setdefault("backbone_type_", (state.get("_packed") or {}).get("model_type"))
+        state.setdefault("precision_used_", None)
+        state.setdefault("_precision", "fp32")
         self.__dict__.update(state)
 
     def _pack(self) -> dict[str, Any]:
@@ -329,22 +409,27 @@ class TransformerModel:
     # ------------------------------------------------------------------ #
     # Setup
     # ------------------------------------------------------------------ #
-    def _resolve_device(self) -> None:
+    def _resolve_device(self, model_type: str | None = None) -> None:
         import torch
 
         device = torch.device(self.device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        amp = device.type == "cuda" if self.fp16 is None else bool(self.fp16)
-        if amp and device.type != "cuda":
-            self.log(f"[transformer] fp16 needs CUDA; running in float32 on {device}")
-            amp = False
-        self._device, self._amp = device, amp
+        bf16 = False
+        if device.type == "cuda":
+            try:
+                bf16 = bool(torch.cuda.is_bf16_supported())
+            except (AssertionError, RuntimeError):  # no usable CUDA after all
+                bf16 = False
+        used = resolve_precision(self.precision, device.type, bf16, self.model_name, model_type,
+                                 log=self.log)
+        self._device, self._precision, self._amp = device, used, used != "fp32"
 
     def _setup(self, backbone: Any, tokenizer: Any) -> None:
         """Wrap backbone + new head into one module on the device; prepare the tokenizer."""
         import torch
         from torch import nn
 
-        self._resolve_device()
+        self.backbone_type_ = getattr(backbone.config, "model_type", None)
+        self._resolve_device(self.backbone_type_)
         if tokenizer.pad_token is None:
             fallback = tokenizer.sep_token or tokenizer.eos_token or tokenizer.unk_token
             if fallback is None:
@@ -412,7 +497,8 @@ class TransformerModel:
         import torch
 
         if self._amp:
-            return torch.autocast(device_type="cuda", dtype=torch.float16)
+            dtype = torch.bfloat16 if self._precision == "bf16" else torch.float16
+            return torch.autocast(device_type="cuda", dtype=dtype)
         return nullcontext()
 
     def _encode(self, texts: list[str]) -> tuple[Any, Any]:
@@ -453,7 +539,12 @@ class TransformerModel:
                 f = None
                 if feats is not None:
                     f = torch.from_numpy(feats[idx]).to(self._device, non_blocking=True)
-                out[idx] = self._forward(ids, mask, f).float().cpu().numpy()
+                z = self._forward(ids, mask, f).float()
+                if self._amp and not bool(torch.isfinite(z).all()):
+                    # fp16 overflow (DeBERTa on a T4): this batch again in float32.
+                    with torch.autocast(device_type="cuda", enabled=False):
+                        z = self._forward(ids, mask, f).float()
+                out[idx] = z.cpu().numpy()
         return out
 
     # ------------------------------------------------------------------ #
@@ -505,11 +596,27 @@ class TransformerModel:
             backbone = AutoModel.from_pretrained(self.model_name)
         self._packed = None
         self._setup(backbone, tokenizer)
+        self.precision_used_ = self._precision
+        if self.gradient_checkpointing:
+            self._enable_gradient_checkpointing()
 
         start = time.perf_counter()
         self._train(texts, y, feats, train_idx, eval_idx)
         self.train_seconds_ = time.perf_counter() - start
         return self
+
+    def _enable_gradient_checkpointing(self) -> None:
+        backbone = self._net["backbone"]
+        if not getattr(backbone, "supports_gradient_checkpointing", False):
+            self.log(f"[transformer] {type(backbone).__name__} does not support gradient "
+                     "checkpointing; training without it")
+            return
+        try:  # non-reentrant: no warning, and gradients reach every layer
+            backbone.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False})
+        except TypeError:  # transformers < 4.35
+            backbone.gradient_checkpointing_enable()
+        self.log("[transformer] gradient checkpointing on")
 
     def _add_chunks(self, texts: list[str], y: np.ndarray,
                     train_idx: np.ndarray) -> tuple[list[str], np.ndarray, np.ndarray]:
@@ -557,13 +664,13 @@ class TransformerModel:
         optimizer = torch.optim.AdamW(self._param_groups(), lr=self.lr, eps=1e-8)
         scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer, lambda s: _lr_factor(s, warmup, total))
-        scaler = _grad_scaler(self._amp)
+        scaler = _grad_scaler(self._precision == "fp16")  # bf16 needs no loss scaling
         y_t = torch.from_numpy(y.astype(np.float32))
         feats_t = None if feats is None else torch.from_numpy(feats)
         best_state: dict[str, Any] | None = None
 
         self.log(f"[transformer] fine-tuning {self.model_name} on {dev}"
-                 f"{' (fp16)' if self._amp else ''}: {train_idx.size:,} train / "
+                 f"{f' ({self._precision})' if self._amp else ''}: {train_idx.size:,} train / "
                  f"{eval_idx.size:,} held-out texts, {self.epochs} epoch(s), {total:,} steps of "
                  f"{self.batch_size}x{self.grad_accum} texts, max_length {self.max_length_}, "
                  f"{len(self.feature_names_)} features")
@@ -662,7 +769,10 @@ class TransformerModel:
     def params(self) -> dict[str, Any]:
         out: dict[str, Any] = {k: getattr(self, k) for k in (
             "model_name", "use_features", "max_length", "epochs", "batch_size", "grad_accum",
-            "lr", "head_lr", "weight_decay", "warmup_ratio", "eval_fraction", "seed")}
+            "lr", "head_lr", "weight_decay", "warmup_ratio", "eval_fraction", "seed",
+            "precision", "gradient_checkpointing")}
+        out["backbone"] = self.backbone_type_
+        out["precision_used"] = self.precision_used_
         if self.chunk_augment:
             out.update(chunk_augment=self.chunk_augment, chunk_words=self.chunk_words,
                        n_chunks=self.n_chunks_)

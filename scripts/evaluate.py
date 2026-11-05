@@ -22,6 +22,12 @@ Examples:
     python scripts/evaluate.py --corpus ... --splits ... --model transformer \\
         --cache-dir data/cache --save-model models/transformer.joblib
 
+    # DeBERTa-v3-large backbone on a Colab Pro A100 / L4 (bf16), on a capped
+    # train sample that keeps every student and modern AI essay
+    python scripts/evaluate.py --corpus ... --splits ... --model transformer \\
+        --backbone microsoft/deberta-v3-large --precision bf16 --lr 1e-5 \\
+        --batch-size 8 --grad-accum 4 --max-train 60000 --keep-sources fresh,persuade
+
     # Any pickled object with predict_proba(texts) (or a saved AIDetectorModel)
     python scripts/evaluate.py --corpus ... --splits ... \\
         --model joblib:models/detector_model.joblib --out-dir reports/ensemble-v1
@@ -89,6 +95,13 @@ def _positive_int(value: str) -> int:
     if n <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return n
+
+
+def _positive_float(value: str) -> float:
+    x = float(value)
+    if not x > 0:
+        raise argparse.ArgumentTypeError("must be a positive number")
+    return x
 
 
 def parse_oversample(values: Sequence[str]) -> dict[str, int]:
@@ -201,13 +214,25 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--n-jobs", type=int,
                        help="Worker processes for style features and the classifier "
                             "(default: -1 = all cores).")
-    group.add_argument("--hf-model",
-                       help="Transformer backbone (default: distilbert-base-cased).")
+    group.add_argument("--backbone", "--hf-model", dest="hf_model", metavar="MODEL_NAME",
+                       help="Transformer backbone, a Hugging Face model id (default: "
+                            "distilbert-base-cased; e.g. microsoft/deberta-v3-large on an "
+                            "A100 / L4 with --precision bf16 --lr 1e-5).")
     group.add_argument("--max-length", type=_positive_int,
                        help="Transformer input length in tokens (default: 512).")
     group.add_argument("--epochs", type=_positive_int, help="Transformer epochs (default: 1).")
     group.add_argument("--batch-size", type=_positive_int,
                        help="Transformer batch size (default: 16, x2 gradient accumulation).")
+    group.add_argument("--grad-accum", type=_positive_int,
+                       help="Transformer gradient accumulation steps (default: 2).")
+    group.add_argument("--lr", type=_positive_float,
+                       help="Transformer backbone learning rate (default: 3e-5).")
+    group.add_argument("--precision", choices=("auto", "fp16", "bf16", "fp32"),
+                       help="Transformer precision on CUDA (default: auto = bf16 where the GPU "
+                            "supports it, e.g. A100 / L4, else fp16; CPU is always fp32).")
+    group.add_argument("--gradient-checkpointing", action="store_true", default=None,
+                       help="Transformer: recompute activations in the backward pass (less "
+                            "GPU memory, ~30%% slower), e.g. for DeBERTa-v3-large.")
     parser.add_argument("--compare", nargs="+", metavar="REPORT_JSON",
                         help="Only print a comparison table of these report.json files "
                              "(globs are expanded).")
@@ -311,7 +336,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          lm_batch_size=args.lm_batch_size, lm_device=args.lm_device,
                          n_jobs=args.n_jobs, model_name=args.hf_model,
                          max_length=args.max_length, epochs=args.epochs,
-                         batch_size=args.batch_size, bino_observer=args.bino_observer,
+                         batch_size=args.batch_size, grad_accum=args.grad_accum, lr=args.lr,
+                         precision=args.precision,
+                         gradient_checkpointing=args.gradient_checkpointing,
+                         bino_observer=args.bino_observer,
                          bino_performer=args.bino_performer,
                          bino_max_tokens=args.bino_max_tokens,
                          bino_batch_size=args.bino_batch_size,
