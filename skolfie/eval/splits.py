@@ -55,8 +55,10 @@ file is a long (id, split) table rather than one split per id:
 
 Groups (`group_key`): texts that must stay on the same side of the split.
 
-- hc3 `hc3:<subset>:<line>:<human|chatgpt>:<i>` -> `hc3:<subset>:<line>`:
-  every answer (human and ChatGPT) to one question.
+- hc3 `hc3:<subset>:<line>q<hash>:<human|chatgpt>:<i>` -> `hc3:q<hash>`:
+  every answer (human and ChatGPT) to one question, also when HC3 lists the
+  question on several lines or in several subsets (older corpora without the
+  question hash: `hc3:<subset>:<line>`, per line).
 - fresh `fresh:<generator>:<template>.<slots>.<style>.w<N>.t<T>:<i>` ->
   `fresh:<template>.<slots>`: one filled topic, across generators, styles,
   lengths, temperatures and samples. Student essays
@@ -66,6 +68,14 @@ Groups (`group_key`): texts that must stay on the same side of the split.
 - m4gt, autextification: the id itself. Their loaders expose no pairing
   between a human text and the generations made from it (M4GT's
   `parallel` field is not loaded; AuTexTification subtask 1 releases none).
+
+Near duplicates (`near_duplicate_threshold` > 0): texts whose MinHash
+Jaccard estimate reaches the threshold (`skolfie.eval.near_dup`) are joined
+into clusters, and every group holding a cluster member is merged with the
+groups of the other members (named by the smallest group key, so groups
+without near duplicates keep their key and their split). This needs the
+texts, so `add_near_duplicate_clusters` must run first; it also means a new
+row can move the rows it nearly duplicates.
 
 Guarantees, checked by `check_guarantees` on every `build_memberships` call
 (it raises `SplitLeakError`, an `AssertionError`, also under `python -O`):
@@ -143,6 +153,9 @@ class SplitConfig:
     #: Group-key prefixes whose held-out-generator rows are detached rather than
     #: tainting their group (see the module docstring).
     shared_topic_groups: list[str] = field(default_factory=list)
+    #: MinHash Jaccard estimate above which two texts are near duplicates and
+    #: their groups are merged (`skolfie.eval.near_dup`); 0 = off.
+    near_duplicate_threshold: float = 0.0
 
     def __post_init__(self) -> None:
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
@@ -167,6 +180,10 @@ class SplitConfig:
                 f"short_text_max_words must be a positive int, got {self.short_text_max_words!r}"
             )
         self.generator_families = {str(k): str(v) for k, v in dict(self.generator_families).items()}
+        t = self.near_duplicate_threshold
+        if isinstance(t, bool) or not isinstance(t, (int, float)) or not 0.0 <= float(t) <= 1.0:
+            raise ValueError(f"near_duplicate_threshold must be in [0, 1], got {t!r}")
+        self.near_duplicate_threshold = float(t)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SplitConfig:
@@ -188,6 +205,8 @@ class SplitConfig:
         # Only when used, so configs without it keep their hash and splits_version.
         if self.shared_topic_groups:
             out["shared_topic_groups"] = list(self.shared_topic_groups)
+        if self.near_duplicate_threshold:
+            out["near_duplicate_threshold"] = self.near_duplicate_threshold
         return out
 
     def config_hash(self) -> str:
@@ -221,31 +240,42 @@ def load_config(path: str | Path) -> SplitConfig:
 # source -> (pattern on the id, replacement giving the group key). An id that
 # does not match keeps itself as its group. The same (pattern, replacement)
 # pair is used by the scalar and the vectorised function.
-_GROUP_RULES: dict[str, tuple[re.Pattern[str], str]] = {
-    # hc3:<subset>:<line>:<human|chatgpt>:<i>
-    "hc3": (re.compile(r"^(hc3:[^:]+:[^:]+):(?:human|chatgpt):\d+$"), r"\1"),
+_GROUP_RULES: dict[str, list[tuple[re.Pattern[str], str]]] = {
+    "hc3": [
+        # hc3:<subset>:<line>q<question hash>:<human|chatgpt>:<i> -> hc3:q<hash>, so a
+        # question that occurs on several lines or in several subsets is one group
+        (re.compile(r"^hc3:[^:]+:\d+q([0-9a-f]{12}):(?:human|chatgpt):\d+$"), r"hc3:q\1"),
+        # older corpora, no question hash: hc3:<subset>:<line>:<human|chatgpt>:<i>
+        (re.compile(r"^(hc3:[^:]+:[^:]+):(?:human|chatgpt):\d+$"), r"\1"),
+    ],
     # fresh:<generator, may contain ':'>:<template>.<slots>.<style>.w<N>.t<T>:<i>
-    "fresh": (re.compile(r"^fresh:.+:([^:.]+\.[^:.]+)\.[^:]+:\d+$"), r"fresh:\1"),
+    "fresh": [(re.compile(r"^fresh:.+:([^:.]+\.[^:.]+)\.[^:]+:\d+$"), r"fresh:\1")],
 }
+
+#: Column with `skolfie.eval.near_dup.cluster_ids` labels (-1 = none), added by
+#: `add_near_duplicate_clusters`; needed when `near_duplicate_threshold` is set.
+NEAR_DUP_COLUMN = "near_dup_cluster"
 
 
 def group_key(id: str, source: str) -> str:
     """The key of the group `id` belongs to (see the module docstring)."""
-    rule = _GROUP_RULES.get(source)
-    if rule is None:
-        return id
-    pattern, repl = rule
-    return pattern.sub(repl, id)
+    for pattern, repl in _GROUP_RULES.get(source, ()):
+        if pattern.match(id):
+            return pattern.sub(repl, id)
+    return id
 
 
 def group_keys(ids: pd.Series, sources: pd.Series) -> pd.Series:
     """Vectorised `group_key` over aligned id and source columns."""
     out = ids.astype(str).copy()
     src = sources.astype(str).to_numpy()
-    for source, (pattern, repl) in _GROUP_RULES.items():
-        mask = src == source
-        if mask.any():
-            out[mask] = out[mask].str.replace(pattern, repl, regex=True)
+    for source, rules in _GROUP_RULES.items():
+        todo = src == source
+        for pattern, repl in rules:
+            mask = todo & out.str.match(pattern).to_numpy()
+            if mask.any():
+                out[mask] = out[mask].str.replace(pattern, repl, regex=True)
+                todo = todo & ~mask
     return out
 
 
@@ -260,7 +290,73 @@ def split_groups(df: pd.DataFrame, config: SplitConfig) -> pd.Series:
         if detach.any():
             groups = groups.copy()
             groups[detach] = df["id"].astype(str)[detach]
+    if config.near_duplicate_threshold:
+        df = with_near_duplicate_clusters(df, config)
+        groups = merge_near_duplicate_groups(groups, df[NEAR_DUP_COLUMN])
     return groups
+
+
+def merge_near_duplicate_groups(groups: pd.Series, clusters: pd.Series) -> pd.Series:
+    """Merge every group that holds a member of a near-duplicate cluster with the
+    groups of the cluster's other members. A merged group is named by its
+    smallest group key, so groups without near duplicates keep their key."""
+    groups = groups.astype(str)
+    clusters = np.asarray(clusters, dtype=np.int64)
+    codes, uniques = pd.factorize(groups, sort=False)
+    has = np.flatnonzero(clusters >= 0)
+    if has.size == 0:
+        return groups
+    parent = np.arange(len(uniques), dtype=np.int64)
+
+    def find(i: int) -> int:
+        root = i
+        while parent[root] != root:
+            root = parent[root]
+        while parent[i] != root:
+            parent[i], i = root, parent[i]
+        return int(root)
+
+    order = has[np.argsort(clusters[has], kind="stable")]
+    c_sorted, g_sorted = clusters[order], codes[order]
+    for k in range(1, len(order)):
+        if c_sorted[k] == c_sorted[k - 1]:
+            a, b = find(int(g_sorted[k - 1])), find(int(g_sorted[k]))
+            if a != b:
+                parent[b] = a
+    roots = np.fromiter((find(i) for i in range(len(uniques))), np.int64, len(uniques))
+    names = np.asarray(uniques, dtype=object)
+    best: dict[int, str] = {}
+    for root, name in zip(roots, names):
+        if root not in best or name < best[root]:
+            best[int(root)] = name
+    merged = np.array([best[int(r)] for r in roots], dtype=object)
+    return pd.Series(merged[codes], index=groups.index, dtype=object)
+
+
+def with_near_duplicate_clusters(df: pd.DataFrame, config: SplitConfig) -> pd.DataFrame:
+    """`df` itself when it needs no `NEAR_DUP_COLUMN` or already has one, else `df`
+    plus the column computed from its `text` column (ValueError without one)."""
+    if not config.near_duplicate_threshold or NEAR_DUP_COLUMN in df.columns:
+        return df
+    if "text" not in df.columns:
+        raise ValueError(
+            f"near_duplicate_threshold is set but the frame has neither a {NEAR_DUP_COLUMN!r} "
+            "nor a 'text' column; call add_near_duplicate_clusters(df, texts, config) first")
+    return add_near_duplicate_clusters(df, df["text"].astype(str).tolist(), config)
+
+
+def add_near_duplicate_clusters(df: pd.DataFrame, texts: Sequence[str],
+                                config: SplitConfig) -> pd.DataFrame:
+    """`df` plus the `NEAR_DUP_COLUMN` for `texts` (aligned with df's rows);
+    df unchanged when `config.near_duplicate_threshold` is 0."""
+    if not config.near_duplicate_threshold:
+        return df
+    from skolfie.eval.near_dup import cluster_ids
+
+    if len(texts) != len(df):
+        raise ValueError(f"{len(texts)} texts for {len(df)} corpus rows")
+    clusters = cluster_ids(texts, threshold=config.near_duplicate_threshold, seed=config.seed)
+    return df.assign(**{NEAR_DUP_COLUMN: clusters})
 
 
 def _unit_hash(keys: Sequence[str], seed: int) -> np.ndarray:
@@ -312,6 +408,7 @@ def assign_splits(df: pd.DataFrame, config: SplitConfig) -> pd.Series:
     group (not on row order or the rest of the corpus), see the module docstring.
     """
     _check_frame(df)
+    df = with_near_duplicate_clusters(df, config)
     groups = split_groups(df, config)
     codes, uniques = pd.factorize(groups, sort=False)
     ood_domain, ood_gen = _held_out_masks(df, config)
@@ -381,6 +478,7 @@ def build_memberships(
 
 def make_splits(df: pd.DataFrame, config: SplitConfig) -> pd.DataFrame:
     """`assign_splits` + `build_memberships` (checked): the (id, split) table."""
+    df = with_near_duplicate_clusters(df, config)   # once, for both steps
     return build_memberships(df, assign_splits(df, config), config)
 
 
@@ -607,6 +705,11 @@ def write_splits(
         "warnings": warnings,
         "counts": summary.to_dict(orient="records"),
     }
+    if NEAR_DUP_COLUMN in df.columns:
+        labels = df[NEAR_DUP_COLUMN].to_numpy()
+        labels = labels[labels >= 0]
+        manifest["near_duplicates"] = {"rows": int(labels.size),
+                                       "clusters": int(np.unique(labels).size)}
     summary_md = render_summary(manifest)
 
     parquet_path = out_dir / "splits.parquet"
@@ -681,6 +784,11 @@ def render_summary(manifest: Mapping[str, Any]) -> str:
     if cfg.get("shared_topic_groups"):
         out.append("- shared-topic groups (held-out-generator rows detached, not tainting): "
                    + ", ".join(f"`{g}`" for g in cfg["shared_topic_groups"]))
+    if cfg.get("near_duplicate_threshold"):
+        nd = manifest.get("near_duplicates") or {}
+        out.append(f"- near duplicates (MinHash Jaccard >= {cfg['near_duplicate_threshold']}): "
+                   f"{nd.get('rows', 0):,} texts in {nd.get('clusters', 0):,} clusters, "
+                   "each cluster kept on one side of the split")
     out += [
         "",
         "## Split sizes",

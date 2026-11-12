@@ -12,8 +12,9 @@ Example:
 
 Writes splits.parquet (id, split; one row per membership), splits_manifest.json
 and splits.md to --out-dir (see skolfie/eval/splits.py) and prints the
-summary. The `text` column is never read. Exit code 1 if a split guarantee
-fails (nothing is written), 2 on bad arguments or unreadable inputs.
+summary. The `text` column is read only for `near_duplicate_threshold`.
+Exit code 1 if a split guarantee fails (nothing is written), 2 on bad arguments or
+unreadable inputs.
 """
 
 from __future__ import annotations
@@ -64,11 +65,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     started = time.perf_counter()
     try:
-        df = pd.read_parquet(args.corpus, columns=list(splits.REQUIRED_COLUMNS))
+        columns = list(splits.REQUIRED_COLUMNS)
+        if config.near_duplicate_threshold:
+            columns.append("text")
+        df = pd.read_parquet(args.corpus, columns=columns)
     except Exception as exc:  # missing file, not Parquet, missing columns
         print(f"error: cannot read corpus {args.corpus}: {type(exc).__name__}: {exc}",
               file=sys.stderr)
         return 2
+    if config.near_duplicate_threshold:
+        print(f"[splits] finding near duplicates (Jaccard >= "
+              f"{config.near_duplicate_threshold}) in {len(df):,} texts ...", flush=True)
+        df = splits.add_near_duplicate_clusters(df, df.pop("text").tolist(), config)
     try:
         memberships = splits.make_splits(df, config)
     except splits.SplitLeakError as exc:
