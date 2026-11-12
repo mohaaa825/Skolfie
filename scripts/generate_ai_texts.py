@@ -16,6 +16,10 @@ Examples:
     python scripts/generate_ai_texts.py --provider openai --model gpt-6-astra --n 500
     python scripts/generate_ai_texts.py --provider gemini --n 500
 
+    # Student essays from any vendor through OpenRouter (OPENROUTER_API_KEY)
+    python scripts/generate_ai_texts.py --provider openrouter --model mistralai/<model> \\
+        --plan student --n 500
+
     # Llama / Mistral on any OpenAI-compatible server
     OPENAI_COMPATIBLE_BASE_URL=http://localhost:11434/v1 \\
         python scripts/generate_ai_texts.py --provider openai-compatible --model llama3.3:70b
@@ -264,6 +268,7 @@ def run_generation(
     out_path: Path,
     *,
     generator: str | None = None,
+    postprocess: Callable[[str], str] | None = None,
     concurrency: int = 4,
     log: Callable[[str], None] = print,
     progress_every: int = 25,
@@ -318,6 +323,8 @@ def run_generation(
                     continue
                 summary.attempted += 1
                 text, reason = clean_output(raw)
+                if text is not None and postprocess is not None:
+                    text, reason = clean_output(postprocess(text))
                 if text is None:
                     summary.dropped[reason] += 1
                 else:
@@ -352,7 +359,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Generate fresh AI text from current models as 'fresh' corpus records.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, "
+            "Env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, "
             "OPENAI_COMPATIBLE_BASE_URL, OPENAI_COMPATIBLE_API_KEY "
             "(optional: ANTHROPIC_BASE_URL, OPENAI_BASE_URL, GEMINI_BASE_URL).\n"
             f"Default models: {defaults}."
@@ -363,6 +370,15 @@ def build_parser() -> argparse.ArgumentParser:
                         help="model id (default per provider; required for OpenAI-compatible)")
     parser.add_argument("--n", type=int, default=500, help="number of prompts (default 500)")
     parser.add_argument("--seed", type=int, default=0, help="prompt-sampling seed (default 0)")
+    parser.add_argument("--plan", choices=("bank", "student"), default="bank",
+                        help="bank: the general prompt bank across domains (default); student: "
+                             "student essays (PERSUADE assignments with grade 6-12 personas, plus "
+                             "college essays), skolfie.data.generation.student")
+    parser.add_argument("--persuade-share", type=float, default=0.6,
+                        help="--plan student: share of PERSUADE assignments (default 0.6)")
+    parser.add_argument("--plain-text", action="store_true",
+                        help="store the essays without Markdown marks (headings, **bold**, "
+                             "inline LaTeX), as a student would paste them")
     parser.add_argument("--domains", default=None,
                         help="comma-separated subset of: "
                              + ",".join(dict.fromkeys(DOMAIN_BLOCK)) + " (default: all)")
@@ -449,7 +465,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         model = resolve_model(args.provider, args.model)
-        specs = sample_prompts(args.n, seed=args.seed, domains=_parse_domains(args.domains))
+        if args.plan == "student":
+            from skolfie.data.generation.student import student_prompt_plan
+
+            specs = student_prompt_plan(args.n, seed=args.seed,
+                                        persuade_share=args.persuade_share)
+        else:
+            specs = sample_prompts(args.n, seed=args.seed, domains=_parse_domains(args.domains))
     except (ProviderConfigError, ValueError) as exc:
         parser.error(str(exc))
     generator = generator_id(model)
@@ -468,8 +490,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     print(f"generating with {args.provider}:{model} -> {out_path}")
+    postprocess = None
+    if args.plain_text:
+        from skolfie.data.generation.markdown import strip_markdown as postprocess
     summary = run_generation(provider, specs, out_path, generator=generator,
-                             concurrency=args.concurrency)
+                             concurrency=args.concurrency, postprocess=postprocess)
     print_summary(summary, provider, out_path)
     return 1 if summary.aborted else 0
 

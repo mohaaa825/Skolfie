@@ -18,6 +18,8 @@ sent only in a request header and is masked in every error message.
     openai-compatible OPENAI_COMPATIBLE_BASE_URL,                    (--model required)
                       OPENAI_COMPATIBLE_API_KEY
     together / groq / ollama / vllm: openai-compatible with the base URL preset
+    openrouter        OPENROUTER_API_KEY (or OPENAI_COMPATIBLE_API_KEY); one key for
+                      many vendors' models, ids like "<vendor>/<model>"
     fake              none (deterministic, for tests)                fake-model
 
 `generate` returns "" when the API answers but gives no usable text (a
@@ -57,6 +59,7 @@ OPENAI_COMPATIBLE_PRESETS: dict[str, str | None] = {
     "groq": "https://api.groq.com/openai/v1",
     "ollama": "http://localhost:11434/v1",
     "vllm": "http://localhost:8000/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
 }
 
 PROVIDER_NAMES = ("anthropic", "openai", "gemini", *OPENAI_COMPATIBLE_PRESETS, "fake")
@@ -474,10 +477,16 @@ class OpenAICompatibleProvider(OpenAIProvider):
             raise ProviderConfigError(
                 "set OPENAI_COMPATIBLE_BASE_URL (e.g. http://localhost:11434/v1) or pass --base-url"
             )
+        if preset == "openrouter":
+            api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
         api_key = api_key or os.environ.get("OPENAI_COMPATIBLE_API_KEY")
-        if not api_key and preset in ("together", "groq"):
-            raise ProviderConfigError(f"set OPENAI_COMPATIBLE_API_KEY to use {preset}")
+        if not api_key and preset in ("together", "groq", "openrouter"):
+            env = "OPENROUTER_API_KEY" if preset == "openrouter" else "OPENAI_COMPATIBLE_API_KEY"
+            raise ProviderConfigError(f"set {env} to use {preset}")
         self.provider_name = preset
+        if preset == "openrouter":
+            # Reasoning models behind OpenRouter count their thinking against max_tokens.
+            self.extra_max_tokens = 4096
         HTTPProvider.__init__(self, model, api_key=api_key, base_url=url, **kwargs)
 
 

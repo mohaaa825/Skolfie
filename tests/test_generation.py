@@ -62,7 +62,7 @@ def gen():
 @pytest.fixture(autouse=True)
 def _no_keys(monkeypatch):
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-                "OPENAI_COMPATIBLE_BASE_URL", "OPENAI_COMPATIBLE_API_KEY",
+                "OPENAI_COMPATIBLE_BASE_URL", "OPENAI_COMPATIBLE_API_KEY", "OPENROUTER_API_KEY",
                 "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GEMINI_BASE_URL"):
         monkeypatch.delenv(var, raising=False)
 
@@ -510,3 +510,38 @@ def test_fatal_status_aborts_run(gen, tmp_path: Path, monkeypatch, sleeps) -> No
                                  concurrency=1, log=lambda m: None)
     assert summary.aborted and summary.written == 0
     assert len(http.requests) < 10
+
+
+def test_openrouter_preset(monkeypatch) -> None:
+    reply = {"choices": [{"message": {"content": "Yo."}, "finish_reason": "stop"}]}
+    http = FakeHTTP(ok(reply))
+    monkeypatch.setattr(providers, "_http_post", http)
+    with pytest.raises(ProviderConfigError, match="OPENROUTER_API_KEY"):
+        make_provider("openrouter", "mistralai/some-model")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    p = make_provider("openrouter", "mistralai/some-model")
+    p.generate("x", temperature=0.7, max_tokens=100)
+    req = http.requests[0]
+    assert req["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert req["headers"]["authorization"] == "Bearer sk-or-test"
+    assert req["payload"]["model"] == "mistralai/some-model"
+    assert req["payload"]["max_tokens"] == 100 + 4096   # room for reasoning tokens
+
+
+def test_student_plan_and_plain_text(gen, tmp_path, capsys) -> None:
+    assert gen.main(["--provider", "fake", "--plan", "student", "--n", "8", "--dry-run",
+                     "--out-dir", str(tmp_path)]) == 0
+    assert "persuade-" in capsys.readouterr().out
+
+    from skolfie.data.generation.student import student_prompt_plan
+
+    specs = student_prompt_plan(3, seed=0)
+    marked = FakeProvider(responses=["## Title\n\n**Phones** and *driving* " + BODY] * 3)
+    out = tmp_path / "plain.jsonl"
+    from skolfie.data.generation.markdown import strip_markdown
+
+    summary = gen.run_generation(marked, specs, out, postprocess=strip_markdown,
+                                 log=lambda m: None)
+    assert summary.written == 3
+    texts = [json.loads(line)["text"] for line in out.read_text().splitlines()]
+    assert all("**" not in t and "#" not in t and "*driving*" not in t for t in texts)

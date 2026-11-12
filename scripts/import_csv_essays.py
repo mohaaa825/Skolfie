@@ -51,6 +51,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
     sys.path.insert(0, str(REPO_ROOT))
 
+from skolfie.data.generation.markdown import strip_markdown  # noqa: E402,F401
 from skolfie.data.generation.prompts import PromptSpec, max_tokens_for  # noqa: E402
 
 COLUMNS = {"number": "Essay Number", "model": "Model Used", "grade": "Grade Level",
@@ -80,30 +81,6 @@ def _generate_module():
 
 def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "x"
-
-
-def _plain_math(m: re.Match) -> str:
-    math = re.sub(r"\\(?:text|mathrm|mathbf)\{([^}]*)\}", r"\1", m.group(1))
-    math = math.replace("\\times", "x").replace("\\cdot", "x").replace("\\rightarrow", "->")
-    return re.sub(r"[_^{}\\]", "", math)
-
-
-def strip_markdown(text: str) -> str:
-    """Remove Markdown emphasis and heading marks, keep the words; inline LaTeX
-    (`$M_1V_1$`, `$\\text{CO}_2$`) becomes plain text (`M1V1`, `CO2`)."""
-    # Math only, not prices ("$10 ... $20"): a backslash command, a single letter, or no
-    # leading digit/space plus a _ ^ or = inside.
-    text = re.sub(r"\$((?=[^$\n]*\\)[^$\n]{1,80}?|[A-Za-z]"
-                  r"|(?=[^$\d\s][^$\n]*[_^=])[^$\n]{1,80}?)\$", _plain_math, text)
-    text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)
-    text = re.sub(r"(?m)^(\s*)[*+]\s+", r"\1- ", text)  # "* item" bullets -> "- item"
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"__(.+?)__", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"\1", text)
-    text = re.sub(r"(?<![\w_])_(?!\s)(.+?)(?<!\s)_(?![\w_])", r"\1", text)
-    text = text.replace("**", "")
-    text = re.sub(r"[ \t]+\n", "\n", text)  # Markdown hard breaks ("  \n")
-    return text.strip()
 
 
 def topic_of(prompt: str) -> Optional[str]:
