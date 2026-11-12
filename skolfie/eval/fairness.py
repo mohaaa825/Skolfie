@@ -87,7 +87,7 @@ PROFICIENCY_LABELS = tuple(label for label, _, _ in PROFICIENCY_BANDS)
 
 KEY_FEATURES = ("lm_mean_nll", "sty_mattr50", "sty_word_len_mean", "sty_sent_len_mean")
 FEATURE_TITLES = {
-    "lm_mean_nll": "GPT-2 log-perplexity",
+    "lm_mean_nll": "language-model log-perplexity",
     "sty_mattr50": "vocabulary variety (MATTR-50)",
     "sty_word_len_mean": "mean word length",
     "sty_sent_len_mean": "mean sentence length",
