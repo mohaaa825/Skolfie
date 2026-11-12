@@ -8,6 +8,7 @@ Source loaders against small fixture files in each dataset's on-disk format
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from collections import Counter
 from pathlib import Path
@@ -27,7 +28,12 @@ def _load(module, raw_dir: Path = FIXTURES) -> list[Record]:
 def _by_id(records: list[Record]) -> dict[str, Record]:
     ids = [r.id for r in records]
     assert len(ids) == len(set(ids)), "ids must be unique"
-    return {r.id: r for r in records}
+    return {_untag(r.id): r for r in records}
+
+
+def _untag(id_: str) -> str:
+    """An HC3 id without its question hash ("hc3:x:3q<12 hex>:human:0" -> "hc3:x:3:human:0")."""
+    return re.sub(r"^(hc3:[^:]+:\d+)q[0-9a-f]{12}:", r"\1:", id_)
 
 
 # --------------------------------------------------------------------- registry
@@ -106,6 +112,22 @@ def test_hc3_repeated_row_ids_still_give_unique_record_ids(tmp_path):
     assert len(ids) == 6 and len(set(ids)) == 6
 
 
+def test_hc3_ids_carry_a_question_hash_shared_by_repeated_questions(tmp_path):
+    src = tmp_path / "hc3"
+    src.mkdir()
+    rows = [{"question": "Why is the sky blue?", "human_answers": ["a"], "chatgpt_answers": ["b"]},
+            {"question": "why is the  SKY blue?", "human_answers": ["c"], "chatgpt_answers": []},
+            {"question": "Other question", "human_answers": ["d"], "chatgpt_answers": []},
+            {"human_answers": ["e"], "chatgpt_answers": []}]
+    (src / "open_qa.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    ids = [r.id for r in _load(hc3, tmp_path)]
+    tags = [re.match(r"^hc3:open_qa:\d+(q[0-9a-f]{12})?:", i).group(1) for i in ids]
+    assert tags[0] == tags[1] == tags[2] is not None   # same question, lines 0 and 1
+    assert tags[3] not in (None, tags[0])
+    assert tags[4] is None                               # no question: no tag
+    assert ids[4] == "hc3:open_qa:3:human:0"
+
+
 def test_hc3_cleans_tokenisation_artefacts_in_human_answers():
     records = _by_id(_load(hc3))
     text = records["hc3:reddit_eli5:0:human:0"].text
@@ -127,7 +149,7 @@ def test_hc3_uses_all_jsonl_only_without_subset_files(tmp_path):
            "source": "open_qa"}
     (src / "all.jsonl").write_text(json.dumps(row) + "\n")
     records = _load(hc3, tmp_path)
-    assert [r.id for r in records] == ["hc3:all:0:human:0", "hc3:all:0:chatgpt:0"]
+    assert [_untag(r.id) for r in records] == ["hc3:all:0:human:0", "hc3:all:0:chatgpt:0"]
     assert {r.subdomain for r in records} == {"open_qa"}
     shutil.copy(FIXTURES / "hc3" / "finance.jsonl", src / "finance.jsonl")
     assert {r.subdomain for r in _load(hc3, tmp_path)} == {"finance"}

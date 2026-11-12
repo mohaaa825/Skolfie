@@ -336,8 +336,8 @@ def _modern_frame() -> pd.DataFrame:
     rows = []
 
     def add(id_, label, gen, source, domain="academic"):
-        rows.append({"id": id_, "label": label, "generator": gen, "domain": domain,
-                     "source": source, "n_words": 300})
+        rows.append({"id": id_, "text": f"essay {len(rows)}", "label": label, "generator": gen,
+                     "domain": domain, "source": source, "n_words": 300})
 
     for name in sorted(PERSUADE_PROMPTS):
         for grade in range(6, 13):

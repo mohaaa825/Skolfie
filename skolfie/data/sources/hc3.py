@@ -14,6 +14,10 @@ question with lists of answers:
 becomes its own Record. The per-subset files are preferred; `all.jsonl` is
 read only when none of them is present, so nothing is loaded twice.
 
+Ids: `hc3:<subset>:<line>q<12 hex>:<human|chatgpt>:<i>`, where the hex is a
+hash of the normalised question, so the split can keep a question that HC3
+lists more than once on one side (`skolfie.eval.splits`).
+
 Generator: HC3 was collected from the ChatGPT web interface (Dec 2022 to
 Jan 2023), before the gpt-3.5-turbo API existed, and the source names no
 model version, so AI answers keep generator "chatgpt".
@@ -30,6 +34,7 @@ told apart from legitimate spacing. Without this, the detector would learn
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from collections.abc import Iterator
@@ -130,6 +135,17 @@ def _answers(row: dict, keys: tuple[str, ...], where: str) -> list[str]:
     return [a for a in value if isinstance(a, str) and a.strip()]
 
 
+def _question_tag(row: dict) -> str:
+    """"q<12 hex>" from the normalised question text ("" when there is none), so
+    that the split groups every answer to a question that HC3 lists on several
+    lines or in several subsets (`skolfie.eval.splits`)."""
+    question = row.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return ""
+    norm = " ".join(question.lower().split())
+    return "q" + hashlib.blake2b(norm.encode("utf-8"), digest_size=6).hexdigest()
+
+
 def load(raw_dir: Path, download: bool = True) -> Iterator[Record]:
     """Yield one Record per HC3 English answer found in `raw_dir/hc3/`."""
     directory = Path(raw_dir) / NAME
@@ -159,7 +175,7 @@ def load(raw_dir: Path, download: bool = True) -> Iterator[Record]:
             # Ids use the line number, never the row's own "id": HC3's ids are not
             # unique within a file, and reusing them dropped half the corpus.
             domain = DOMAIN_MAP.get(subset, "qa")
-            prefix = f"{NAME}:{file_subset}:{index}"
+            prefix = f"{NAME}:{file_subset}:{index}{_question_tag(row)}"
 
             for i, answer in enumerate(human):
                 text = clean_human_answer(answer)

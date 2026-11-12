@@ -10,6 +10,7 @@ section in retrain_modern.ipynb.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from pathlib import Path
@@ -68,7 +69,9 @@ def corpus() -> pd.DataFrame:
 
 @pytest.fixture(scope="module")
 def base() -> splits_mod.SplitConfig:
-    return splits_mod.load_config(CONFIG)
+    # The synthetic texts are built from ids, so they look like near duplicates of each
+    # other; near-duplicate merging is tested in test_near_dup.py.
+    return dataclasses.replace(splits_mod.load_config(CONFIG), near_duplicate_threshold=0.0)
 
 
 # --------------------------------------------------------------------------- #

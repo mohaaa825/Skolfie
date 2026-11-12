@@ -165,6 +165,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     base = load_config(args.config)
     corpus = load_lofo_corpus(args.corpus)
+    if base.near_duplicate_threshold:
+        from skolfie.eval.splits import add_near_duplicate_clusters
+
+        print("[lofo] finding near duplicates for the splits ...", flush=True)
+        corpus = add_near_duplicate_clusters(corpus, corpus["text"].astype(str).tolist(), base)
     present = lofo.ai_families(corpus, base)
     unknown = [f for f in families if f not in present]
     if unknown:
