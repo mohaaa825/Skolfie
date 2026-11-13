@@ -272,9 +272,9 @@ mark { background: var(--pink-100); color: inherit; padding: 1px 3px; border-rad
   .grid--3:has(> .who--photo) > .who--photo { grid-template-columns: minmax(0, 1fr); } /* full-width glass even when its text is short */
 }
 .who--photo::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(255,255,255,0) 45%, rgba(255,255,255,.18)); pointer-events: none; }
-.who--photo:nth-child(1) { background-position: 50% 40%; }
-.who--photo:nth-child(2) { background-position: 30% 60%; }
-.who--photo:nth-child(3) { background-position: 70% 70%; }
+.who--photo:nth-child(1) { background-position: 40% 50%; }
+.who--photo:nth-child(2) { background-position: 50% 45%; }
+.who--photo:nth-child(3) { background-position: 50% 60%; }
 .who--photo:hover { transform: translateY(-6px); box-shadow: 0 2px 4px rgba(16,42,66,.05), 0 24px 60px rgba(16,42,66,.14); }
 .who__glass { display: flex; flex-direction: column; padding: 24px 24px 26px; border-radius: 16px; background: linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,.18)); -webkit-backdrop-filter: blur(10px) saturate(150%); backdrop-filter: blur(10px) saturate(150%); border: 1px solid rgba(255,255,255,.6); box-shadow: inset 0 1px 0 rgba(255,255,255,.75), 0 8px 24px rgba(16,42,66,.08); }
 .who__glass h3, .who__glass p { text-shadow: 0 0 12px rgba(255,255,255,.65); }

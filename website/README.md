@@ -15,8 +15,7 @@ Palette: white, baby blue and pink, matching `THEME_TOKENS` in `skolfie/app/grad
   (plus one for Medium, weight 500) at the top of `styles.css`.
 - **Background photos:** `assets/photos/hero-blossom.jpg` (landing page, Stockholm waterfront with
   cherry blossoms) and `try-harbour.jpg` (behind the "Try Skolfie" glass card), each with a `-sm`
-  version for phones. Both are paintings supplied by the site owner. `sky-*.jpg` are rendered pastel
-  skies used on the who-it's-for cards. Keep each file under 400 KB.
+  version for phones. Both are paintings supplied by the site owner. `aerial-*.jpg` are three crops of an aerial Stockholm painting (also supplied) on the who-it's-for cards. Keep each file under 400 KB.
 - **Motion:** headline word reveal, scroll fade-ups, count-up numbers, the mock-up's meter and
   highlights animating in, slow drift and parallax on the photos. All of it switches off for
   visitors who ask their device for reduced motion.
