@@ -50,14 +50,11 @@
       <div class="hero__photo" aria-hidden="true"><div class="hero__img"></div></div>
       <div class="hero__fade" aria-hidden="true"></div>
       <div class="wrap hero__inner">
-        <p class="eyebrow">For teachers and schools</p>
         <h1 class="js-words">Know when an essay was written by&nbsp;AI.</h1>
-        <p class="lead" data-reveal>Skolfie reads a student text and tells you whether it looks human, AI-generated or mixed, and shows you why. Built for essays and longer texts.</p>
         <div class="cta" data-reveal>
           <a class="btn btn--primary js-app" href="#try">Check a text</a>
           <a class="btn btn--ghost" href="#how">See how it works <span aria-hidden="true">→</span></a>
         </div>
-        <p class="backed" data-reveal>Trained on essays from <strong>GPT</strong>, <strong>Claude</strong>, <strong>Gemini</strong> and more, next to thousands of real student essays.</p>
       </div>
 
       <!-- Product mock-up -->
@@ -110,11 +107,11 @@
       <div class="wrap">
         <h2 id="numbers-title" class="sr">Test results</h2>
         <div class="numbers__grid">
-          <div class="stat" data-reveal><p class="stat__value"><span data-count="97">97</span>–100%</p><p class="stat__label">of AI essays caught from the newest Claude and Gemini models in our tests</p></div>
-          <div class="stat" data-reveal><p class="stat__value"><span data-count="99.6" data-decimals="1">99.6</span>%</p><p class="stat__label">caught from an AI model Skolfie never saw in training</p></div>
-          <div class="stat" data-reveal><p class="stat__value"><span data-count="0.2" data-decimals="1">0.2</span>%</p><p class="stat__label">of real student essays wrongly flagged as AI (1 in 585)</p></div>
+          <div class="stat" data-reveal><p class="stat__value"><span data-count="97">97</span>–100%</p><p class="stat__label">of AI essays caught from the newest Claude and Gemini</p></div>
+          <div class="stat" data-reveal><p class="stat__value"><span data-count="99.6" data-decimals="1">99.6</span>%</p><p class="stat__label">caught from an AI model never seen in training</p></div>
+          <div class="stat" data-reveal><p class="stat__value"><span data-count="0.2" data-decimals="1">0.2</span>%</p><p class="stat__label">of real student essays wrongly flagged (1 in 585)</p></div>
         </div>
-        <p class="fine">Held-out test set, November 2026. Results on your own students will differ; see <a href="#responsible">responsible use</a>.</p>
+        <p class="fine">Held-out test set, Nov 2026. Results on your own students may differ (<a href="#responsible">responsible use</a>).</p>
       </div>
     </section>
 
@@ -123,7 +120,6 @@
       <div class="wrap">
         <p class="eyebrow" data-reveal>How it works</p>
         <h2 id="how-title" data-reveal>Several detectors. One clear answer.</h2>
-        <p class="sub" data-reveal>Skolfie doesn't rely on a single trick. It combines different ways of reading a text and weighs them into one calibrated score.</p>
 
         <div class="chips" data-reveal role="tablist" aria-label="Parts of the detector">
           <button role="tab" aria-selected="true" aria-controls="p-style" id="t-style">Writing style</button>
@@ -136,23 +132,23 @@
         <div class="panels">
           <div class="panel" role="tabpanel" id="p-style" aria-labelledby="t-style">
             <h3>Writing style</h3>
-            <p>About 130 measurable traits of the text: sentence length and how much it varies, word choice, punctuation, function words and vocabulary richness. Classic stylometry, including Burrows' Delta, the method used to identify authors of disputed texts.</p>
+            <p>About 130 style traits, including Burrows' Delta.</p>
           </div>
           <div class="panel" role="tabpanel" id="p-lang" aria-labelledby="t-lang" hidden>
             <h3>Language model</h3>
-            <p>A DeBERTa transformer fine-tuned on hundreds of thousands of human and AI texts, including fresh essays written by today's models next to real student essays on the same topics.</p>
+            <p>A DeBERTa model fine-tuned on human and AI texts, including fresh essays from current models.</p>
           </div>
           <div class="panel" role="tabpanel" id="p-pred" aria-labelledby="t-pred" hidden>
             <h3>Predictability</h3>
-            <p>AI text tends to choose the most likely next word. Skolfie compares how surprising each word is to two open language models, a signal that keeps working on new chatbots.</p>
+            <p>How predictable each word is to two open language models.</p>
           </div>
           <div class="panel" role="tabpanel" id="p-mixed" aria-labelledby="t-mixed" hidden>
             <h3>Mixed texts</h3>
-            <p>Long texts are checked piece by piece, so a student essay with a pasted-in AI paragraph is labelled Mixed and the AI-looking passages are highlighted. (This part is being retrained for the newest AI models.)</p>
+            <p>Long texts are checked in chunks. Partly AI essays get a Mixed label, with the AI passages highlighted. (Being retrained for the newest models.)</p>
           </div>
           <div class="panel" role="tabpanel" id="p-why" aria-labelledby="t-why" hidden>
             <h3>Reasons you can read</h3>
-            <p>Every verdict comes with plain-language reasons, such as "unusually even sentence lengths", and warnings when a text is too short or the result is less reliable.</p>
+            <p>Every verdict comes with plain-language reasons and warnings.</p>
           </div>
         </div>
       </div>
@@ -169,28 +165,28 @@
               <svg viewBox="0 0 24 24"><path d="M4 12h16M4 6h16M4 18h10"/></svg>
             </div>
             <h3>Explains itself</h3>
-            <p>You see which passages and which traits drove the result, so you can talk to the student about the text itself.</p>
+            <p>Shows which passages and traits drove the result.</p>
           </article>
           <article class="card" data-reveal>
             <div class="icon icon--pink" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>
             </div>
             <h3>Careful by default</h3>
-            <p>Tuned so that very few honest essays are flagged. When Skolfie is unsure, it says so.</p>
+            <p>Very few honest essays flagged. Says so when unsure.</p>
           </article>
           <article class="card" data-reveal>
             <div class="icon icon--blue" aria-hidden="true">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
             </div>
             <h3>Keeps up with new AI</h3>
-            <p>Retrained with essays from the newest chatbots, and tested on models it has never seen.</p>
+            <p>Trained on essays from the newest models, tested on unseen ones.</p>
           </article>
           <article class="card" data-reveal>
             <div class="icon icon--pink" aria-hidden="true">
               <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
             </div>
             <h3>Private</h3>
-            <p>Texts are checked by Skolfie's own models. No student writing is sent to ChatGPT or any other AI service.</p>
+            <p>No student text is sent to ChatGPT or other AI services.</p>
           </article>
         </div>
       </div>
@@ -205,19 +201,19 @@
           <article class="who who--photo" data-reveal style="--photo:url(assets/photos/sky-soft.jpg)">
             <div class="who__glass">
             <h3>Teachers</h3>
-            <p>Paste an essay or upload a file, and get a verdict with reasons in seconds.</p>
+            <p>Paste an essay, get a verdict with reasons.</p>
             </div>
           </article>
           <article class="who who--photo" data-reveal style="--photo:url(assets/photos/sky-dusk.jpg)">
             <div class="who__glass">
             <h3>Schools</h3>
-            <p>Check a whole folder of essays at once and keep a consistent, explainable process.</p>
+            <p>Check a whole folder of essays at once.</p>
             </div>
           </article>
           <article class="who who--photo" data-reveal style="--photo:url(assets/photos/sky-hero.jpg)">
             <div class="who__glass">
             <h3>Exam boards</h3>
-            <p>Screen coursework at scale, with a cautious cut-off and clear warnings.</p>
+            <p>Screen coursework at scale.</p>
             </div>
           </article>
         </div>
@@ -229,12 +225,12 @@
       <div class="wrap narrow">
         <p class="eyebrow" data-reveal>Responsible use</p>
         <h2 id="resp-title" data-reveal>A starting point for a conversation.</h2>
-        <p class="sub" data-reveal>No AI detector is proof. Skolfie is built to support a teacher's judgment, never to replace it.</p>
+        <p class="sub" data-reveal>No AI detector is proof.</p>
         <ul class="list">
-          <li data-reveal><strong>Use it alongside what you know.</strong> Drafts, notes and how a student talks about their work matter more than any score.</li>
-          <li data-reveal><strong>Longer is better.</strong> Texts under 150 words get a warning, and under 30 words get no verdict.</li>
-          <li data-reveal><strong>Language learners.</strong> Writing by students still learning English is flagged more often. Skolfie shows a warning on those results.</li>
-          <li data-reveal><strong>English only, for now.</strong> Other languages get a warning instead of a confident verdict.</li>
+          <li data-reveal><strong>Use it alongside what you know.</strong></li>
+          <li data-reveal><strong>Longer is better.</strong> Under 150 words: warning. Under 30: no verdict.</li>
+          <li data-reveal><strong>English learners.</strong> Flagged more often, so their results get a warning.</li>
+          <li data-reveal><strong>English only, for now.</strong></li>
         </ul>
       </div>
     </section>
@@ -244,10 +240,10 @@
       <div class="closing__photo" aria-hidden="true"></div>
       <div class="wrap narrow center closing__card" data-reveal>
         <h2 id="try-title">Try Skolfie.</h2>
-        <p class="sub js-try-note">Paste a student text and see the verdict and the reasons behind it.</p>
+        <p class="sub js-try-note">Paste a text. See the verdict and why.</p>
         <div class="cta cta--center">
           <a class="btn btn--primary js-app js-app-strict" href="#try">Open the checker</a>
-          <a class="btn btn--ghost js-contact" href="#try">Ask about access for your school</a>
+          <a class="btn btn--ghost js-contact" href="#try">Access for schools</a>
         </div>
       </div>
     </section>
@@ -257,7 +253,7 @@
     <div class="wrap footer__inner">
       <div>
         <a class="brand" href="#top" aria-label="Skolfie home"><svg class="wordmark" viewBox="-4 -1518 6137 1546" fill="currentColor" role="img" aria-label="Skolfie" style="height:22px"><path d="M663 24C1016 24 1237 -152 1237 -430C1237 -649 1098 -778 789 -847L638 -882C444 -927 367 -983 367 -1083C367 -1205 484 -1290 649 -1290C823 -1290 937 -1195 948 -1038H1199C1190 -1334 983 -1514 650 -1514C321 -1514 102 -1336 102 -1070C102 -861 239 -730 537 -662L697 -626C896 -580 974 -519 974 -414C974 -283 851 -199 665 -199C458 -199 334 -306 332 -486H73C73 -167 294 24 663 24ZM1381.04 0H1633.04V-353L1729.04 -452L2075.04 0H2376.04L1921.04 -600L2350.04 -1056H2047.04L1636.04 -628H1633.04V-1490H1381.04ZM2910.08 24C3221.08 24 3431.08 -199 3431.08 -527C3431.08 -855 3221.08 -1080 2910.08 -1080C2599.08 -1080 2389.08 -855 2389.08 -527C2389.08 -199 2599.08 24 2910.08 24ZM2910.08 -187C2747.08 -187 2644.08 -316 2644.08 -527C2644.08 -739 2748.08 -869 2910.08 -869C3071.08 -869 3175.08 -738 3175.08 -527C3175.08 -317 3072.08 -187 2910.08 -187ZM3816.12 -1490H3564.12V0H3816.12ZM4562.16 -1056H4347.16V-1168C4347.16 -1254 4379.16 -1287 4465.16 -1287H4562.16V-1490H4415.16C4206.16 -1490 4094.16 -1392 4094.16 -1210V-1056H3904.16V-853H4094.16V0H4347.16V-853H4562.16ZM4673.2 0H4925.2V-1056H4673.2ZM5574.24 24C5821.24 24 6017.24 -119 6057.24 -326H5821.24C5792.24 -236 5707.24 -175 5580.24 -175C5410.24 -175 5312.24 -290 5306.24 -462H6070.24V-531C6070.24 -855 5868.24 -1080 5564.24 -1080C5268.24 -1080 5059.24 -848 5059.24 -527C5059.24 -207 5257.24 24 5574.24 24ZM5308.24 -636C5325.24 -787 5422.24 -880 5568.24 -880C5714.24 -880 5812.24 -787 5828.24 -636Z"/><circle cx="4799.2" cy="-1350.8" r="156.2" fill="var(--logo-dot, #e8699a)"/></svg></a>
-        <p class="footer__tag">The AI-text checker built for teachers.</p>
+        <p class="footer__tag">AI-text checker for teachers.</p>
       </div>
       <div class="footer__cols">
         <div>
@@ -274,7 +270,7 @@
       </div>
     </div>
     <div class="wrap footer__legal">
-      <p>© <span class="js-year">2026</span> Skolfie. AI detection gives a likelihood, not proof.</p>
+      <p>© <span class="js-year">2026</span> Skolfie. A likelihood, not proof.</p>
     </div>
   </footer>
 </body>
