@@ -17,8 +17,12 @@
   --pink-300: #f7a8c4;
   --pink-700: #a3305e;
   --radius: 22px;
-  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
-  --sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Type follows vesence.com, which uses Neue Montreal (Pangram Pangram; commercial use needs a
+     licence). If the font is installed or added under assets/fonts (see README), it is used;
+     otherwise Hanken Grotesk, a free look-alike from Google Fonts, stands in. */
+  --display: "Neue Montreal", "NeueMontreal", "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sans: "Neue Montreal", "NeueMontreal", "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --doc: "Source Serif 4", Georgia, "Times New Roman", serif; /* only the sample essay in the mock-up */
   --wrap: 1120px;
   --shadow: 0 1px 2px rgba(16, 42, 66, .04), 0 12px 40px rgba(16, 42, 66, .08);
 }
@@ -36,7 +40,8 @@ body {
 }
 img, svg { display: block; max-width: 100%; }
 a { color: var(--sky-700); }
-h1, h2, h3 { font-family: var(--serif); font-weight: 500; letter-spacing: -.01em; margin: 0; }
+h1, h2, h3 { font-family: var(--display); font-weight: 500; letter-spacing: -.035em; margin: 0; }
+h3 { letter-spacing: -.02em; }
 h1 { font-size: clamp(2.4rem, 6vw, 4.4rem); line-height: 1.05; }
 h2 { font-size: clamp(1.9rem, 4vw, 3rem); line-height: 1.1; }
 h3 { font-size: 1.3rem; line-height: 1.25; }
@@ -143,11 +148,11 @@ p { margin: 0; }
 .mock__label { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 .mock__main { padding: 24px 28px 28px; }
 .verdict { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
-.verdict__value { font: 500 1.8rem var(--serif); }
+.verdict__value { font: 500 1.8rem var(--display); letter-spacing: -.03em; }
 .verdict__pct { font-size: .9rem; color: var(--muted); white-space: nowrap; }
 .meter { height: 10px; background: var(--sky-100); border-radius: 999px; overflow: hidden; }
 .meter__fill { height: 100%; width: var(--w); background: linear-gradient(90deg, var(--sky-400), var(--pink-300)); border-radius: 999px; }
-.mock__text { margin-top: 18px; font: 1.02rem/1.75 var(--serif); }
+.mock__text { margin-top: 18px; font: 1.02rem/1.75 var(--doc); }
 mark { background: var(--pink-100); color: inherit; padding: 1px 3px; border-radius: 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .reasons { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 10px; font-size: .92rem; color: var(--muted); }
 .reasons li { display: flex; gap: 10px; align-items: baseline; }
@@ -173,7 +178,7 @@ mark { background: var(--pink-100); color: inherit; padding: 1px 3px; border-rad
 .stat { padding: 28px; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
 .stat:nth-child(2) { background: var(--sky-50); border-color: var(--sky-100); }
 .stat:nth-child(3) { background: var(--pink-50); border-color: var(--pink-100); }
-.stat__value { font: 500 2.4rem/1.1 var(--serif); }
+.stat__value { font: 500 2.6rem/1.1 var(--display); letter-spacing: -.04em; }
 .stat__label { margin-top: 8px; color: var(--muted); font-size: .95rem; }
 .fine { margin-top: 14px; font-size: .82rem; color: var(--muted); text-align: center; }
 @media (max-width: 820px) { .numbers__grid { grid-template-columns: 1fr; } }

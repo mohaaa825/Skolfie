@@ -8,6 +8,11 @@ Palette: white, baby blue and pink, matching `THEME_TOKENS` in `skolfie/app/grad
   share link from `notebooks/app.ipynb`, or your own server). Empty = the "Open the checker"
   buttons scroll to the "Try Skolfie" section instead.
 - **Contact:** set `contactEmail` in `config.js` to show "Ask about access for your school".
+- **Font:** Neue Montreal, like vesence.com. It's a commercial font from Pangram Pangram
+  (free for personal use only), so it isn't bundled; the site falls back to Hanken Grotesk, a
+  free look-alike. After buying a web licence, put the files in `assets/fonts/` and add an
+  `@font-face { font-family: "Neue Montreal"; src: url(assets/fonts/NeueMontreal-Regular.woff2) format("woff2"); font-weight: 400; }`
+  (plus one for Medium, weight 500) at the top of `styles.css`.
 - **Background photos:** `assets/photos/sky-hero.jpg` (hero), `sky-soft.jpg` and `sky-dusk.jpg`
   (who-it's-for cards, closing section). They are pastel skies rendered for Skolfie (no licence
   needed). To use your own photos, replace the files with the same names (about 2400x1400 JPEG,
