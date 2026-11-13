@@ -118,10 +118,12 @@ p { margin: 0; }
 
 /* Hero */
 .hero { position: relative; padding: clamp(140px, 19vh, 200px) 0 32px; overflow: hidden; isolation: isolate; }
-.hero h1 { max-width: 11.5em; margin: 0 auto; }
+.hero h1 { max-width: 13em; margin: 0 auto; font-size: clamp(2rem, 4.2vw, 3.3rem); line-height: 1.06; }
 @media (max-width: 720px) { .hero { padding-top: 132px; } .hero .cta .btn { flex: 1 1 auto; } }
 /* Painted Stockholm waterfront: sky behind the headline, the quay and blossoms visible below the buttons. */
-.hero__photo { position: absolute; inset: 0 0 auto; height: max(760px, calc(100vh + 260px)); z-index: -2; overflow: hidden; }
+/* Photos sit in rounded panels with a clean white margin to the page sides. */
+:root { --frame: clamp(10px, 1.6vw, 22px); --frame-radius: clamp(20px, 2.4vw, 32px); }
+.hero__photo { position: absolute; inset: var(--frame) var(--frame) auto; height: max(760px, calc(100vh + 260px)); z-index: -2; overflow: hidden; border-radius: var(--frame-radius); }
 .hero__img {
   position: absolute; inset: -6%; background: url(assets/photos/hero-blossom.jpg) center 62% / cover no-repeat;
   transform: translate3d(0, var(--parallax, 0px), 0) scale(1.06);
@@ -129,17 +131,17 @@ p { margin: 0; }
   will-change: transform;
 }
 @keyframes drift { from { background-position: 47% 60%; } to { background-position: 53% 64%; } }
-.hero__fade { position: absolute; inset: 0 0 auto; height: max(760px, calc(100vh + 260px)); z-index: -1; pointer-events: none;
+.hero__fade { position: absolute; inset: var(--frame) var(--frame) auto; height: max(760px, calc(100vh + 260px)); z-index: -1; pointer-events: none; border-radius: var(--frame-radius);
   background:
     radial-gradient(46% 26% at 50% calc(clamp(140px, 19vh, 200px) + 90px), rgba(255,255,255,.34), rgba(255,255,255,0) 72%),
-    linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 76%, rgba(255,255,255,.7) 93%, #fff 100%); }
+    linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 80%, rgba(255,255,255,.35) 100%); }
 /* Leave a generous stretch of painting between the buttons and the mock-up. */
 .hero .mock { margin-top: clamp(200px, 40vh, 420px); }
 @media (max-width: 720px) {
   .hero__img { background-image: url(assets/photos/hero-blossom-sm.jpg); background-position: 62% 60%; }
   .hero__fade { background:
     radial-gradient(70% 22% at 50% 250px, rgba(255,255,255,.34), rgba(255,255,255,0) 72%),
-    linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 76%, rgba(255,255,255,.7) 93%, #fff 100%); }
+    linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 80%, rgba(255,255,255,.35) 100%); }
   .hero .mock { margin-top: clamp(150px, 30vh, 280px); }
 }
 .hero h1 { text-shadow: 0 0 2px rgba(255, 255, 255, .7), 0 1px 18px rgba(255, 255, 255, .75), 0 0 40px rgba(255, 255, 255, .5); }
@@ -302,7 +304,7 @@ mark { background: var(--pink-100); color: inherit; padding: 1px 3px; border-rad
 @media (max-width: 720px) { .list { margin-top: 36px; padding: 4px 20px; } .list li { padding: 20px 0 20px 40px; } .list li::before { top: 20px; } }
 
 /* Closing */
-.closing { position: relative; overflow: hidden; isolation: isolate; padding: 200px 0; }
+.closing { position: relative; overflow: hidden; isolation: isolate; padding: 200px 0; margin: 0 var(--frame) var(--frame); border-radius: var(--frame-radius); }
 @media (max-width: 720px) { .closing__photo { background-image: url(assets/photos/try-harbour-sm.jpg); background-position: 40% 55%; } }
 .closing__photo { position: absolute; inset: -10% 0; z-index: -1; background: url(assets/photos/try-harbour.jpg) center 58% / cover no-repeat; transform: translate3d(0, var(--parallax, 0px), 0); will-change: transform; }
 .closing__card { width: calc(100% - 32px); max-width: 720px; padding: 72px 56px; border-radius: 32px; background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(255,255,255,.26), rgba(255,255,255,.14)); -webkit-backdrop-filter: blur(10px) saturate(150%); backdrop-filter: blur(10px) saturate(150%); border: 1px solid rgba(255,255,255,.65); box-shadow: 0 20px 60px rgba(31,111,168,.15), inset 0 1px 0 rgba(255,255,255,.8); }
