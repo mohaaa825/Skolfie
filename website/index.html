@@ -110,7 +110,7 @@
         <div class="numbers__grid">
           <div class="stat" data-reveal><p class="stat__value"><span data-count="97">97</span>–100%</p><p class="stat__label">of AI essays caught from the newest Claude and Gemini</p></div>
           <div class="stat" data-reveal><p class="stat__value"><span data-count="99.6" data-decimals="1">99.6</span>%</p><p class="stat__label">caught from an AI model never seen in training</p></div>
-          <div class="stat" data-reveal><p class="stat__value"><span data-count="0.2" data-decimals="1">0.2</span>%</p><p class="stat__label">of real student essays wrongly flagged (1 in 585)</p></div>
+          <div class="stat" data-reveal><p class="stat__value">1 in <span data-count="585">585</span></p><p class="stat__label">real student essays wrongly flagged (0.17%)</p></div>
         </div>
         <p class="fine">Held-out test set, Nov 2026. Results on your own students may differ (<a href="#responsible">responsible use</a>).</p>
       </div>
@@ -230,8 +230,22 @@
         <ul class="list">
           <li data-reveal><strong>Use it alongside what you know.</strong></li>
           <li data-reveal><strong>Longer is better.</strong> Under 150 words: warning. Under 30: no verdict.</li>
-          <li data-reveal><strong>English learners.</strong> Flagged more often, so their results get a warning.</li>
+          <li data-reveal><strong>English learners are flagged more often.</strong> An earlier version wrongly flagged about 1 in 4 essays by English learners (TOEFL essays). We haven't re-measured this on the current model yet, so an AI verdict on such an essay always comes with a warning. Take extra care.</li>
           <li data-reveal><strong>English only, for now.</strong></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Privacy & data (DRAFT: wording not final, check with a lawyer before launch) -->
+    <section class="section" id="privacy" aria-labelledby="privacy-title">
+      <div class="wrap narrow">
+        <p class="eyebrow" data-reveal>Privacy &amp; data <span class="draft-tag">Draft</span></p>
+        <h2 id="privacy-title" data-reveal>Student texts stay private.</h2>
+        <p class="sub" data-reveal>Built with GDPR in mind.</p>
+        <ul class="list">
+          <li data-reveal><strong>No third-party AI.</strong> Essays are checked by Skolfie's own models and are never sent to OpenAI, Google, Anthropic or any other AI provider.</li>
+          <li data-reveal><strong>EU hosting.</strong> Skolfie is moving to servers in the EU, so student texts don't leave Europe.</li>
+          <li data-reveal><strong>A data processing agreement with every school.</strong> We sign a DPA (personuppgiftsbiträdesavtal) with each school before it starts.</li>
         </ul>
       </div>
     </section>
@@ -267,6 +281,7 @@
           <p class="footer__head">Use it well</p>
           <a href="#responsible">Responsible use</a>
           <a href="#who">Who it's for</a>
+          <a href="#privacy">Privacy &amp; data</a>
         </div>
       </div>
     </div>
