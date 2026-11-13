@@ -88,3 +88,10 @@ def test_motion_respects_reduced_motion():
     html_text = (SITE / "index.html").read_text(encoding="utf-8")
     assert "prefers-reduced-motion: reduce" in css
     assert "prefers-reduced-motion: reduce" in html_text
+
+
+def test_nav_uses_wordmark_logo():
+    html_text = (SITE / "index.html").read_text(encoding="utf-8")
+    nav = html_text.split('<header class="nav"', 1)[1].split("</header>", 1)[0]
+    assert 'class="wordmark"' in nav and 'fill="currentColor"' in nav
+    assert (SITE / "assets" / "wordmark.svg").is_file()

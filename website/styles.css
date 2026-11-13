@@ -80,7 +80,11 @@ p { margin: 0; }
 }
 .nav.is-scrolled .nav__inner { height: 56px; background: rgba(255, 255, 255, .62); box-shadow: 0 10px 36px rgba(31, 111, 168, .16), inset 0 1px 0 rgba(255, 255, 255, .9); }
 @media (min-width: 720px) { .nav__inner { padding: 0 12px 0 24px; } }
-.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font: 600 1.15rem var(--sans); }
+.brand { display: inline-flex; align-items: center; color: var(--on-sky); text-decoration: none; border-radius: 6px; }
+.brand:hover { color: var(--sky-700); }
+.wordmark { display: block; width: auto; transition: transform .3s cubic-bezier(.2,.7,.2,1); }
+.brand:hover .wordmark circle { transform-box: fill-box; transform-origin: center; animation: dot-pop .5s cubic-bezier(.2,.7,.2,1); }
+@keyframes dot-pop { 50% { transform: translateY(-18%) scale(1.15); } }
 .nav__links { display: flex; align-items: center; gap: 28px; }
 .nav__links a:not(.btn) { color: var(--muted); text-decoration: none; font-size: .95rem; }
 .nav__links a:not(.btn):hover { color: var(--text); }
