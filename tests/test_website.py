@@ -36,7 +36,7 @@ def _page() -> _Collector:
 
 
 def test_files_exist():
-    for name in ("index.html", "styles.css", "main.js", "config.js", "assets/logo.png", "assets/icon-64.png"):
+    for name in ("index.html", "styles.css", "main.js", "config.js", "assets/logo.svg", "assets/icon.svg"):
         assert (SITE / name).is_file(), name
 
 
@@ -95,4 +95,4 @@ def test_nav_and_footer_use_skolfie_logo():
     nav = html_text.split('<header class="nav"', 1)[1].split("</header>", 1)[0]
     footer = html_text.split('<footer', 1)[1]
     for part in (nav, footer):
-        assert 'src="assets/logo.png"' in part and 'alt="Skolfie"' in part
+        assert 'src="assets/logo.svg"' in part and 'alt="Skolfie"' in part
