@@ -36,7 +36,7 @@ def _page() -> _Collector:
 
 
 def test_files_exist():
-    for name in ("index.html", "styles.css", "main.js", "config.js", "assets/logo.svg"):
+    for name in ("index.html", "styles.css", "main.js", "config.js", "assets/logo.png", "assets/icon-64.png"):
         assert (SITE / name).is_file(), name
 
 
@@ -90,8 +90,9 @@ def test_motion_respects_reduced_motion():
     assert "prefers-reduced-motion: reduce" in html_text
 
 
-def test_nav_uses_wordmark_logo():
+def test_nav_and_footer_use_skolfie_logo():
     html_text = (SITE / "index.html").read_text(encoding="utf-8")
     nav = html_text.split('<header class="nav"', 1)[1].split("</header>", 1)[0]
-    assert 'class="wordmark"' in nav and 'fill="currentColor"' in nav
-    assert (SITE / "assets" / "wordmark.svg").is_file()
+    footer = html_text.split('<footer', 1)[1]
+    for part in (nav, footer):
+        assert 'src="assets/logo.png"' in part and 'alt="Skolfie"' in part
