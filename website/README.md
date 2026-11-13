@@ -13,10 +13,10 @@ Palette: white, baby blue and pink, matching `THEME_TOKENS` in `skolfie/app/grad
   free look-alike. After buying a web licence, put the files in `assets/fonts/` and add an
   `@font-face { font-family: "Neue Montreal"; src: url(assets/fonts/NeueMontreal-Regular.woff2) format("woff2"); font-weight: 400; }`
   (plus one for Medium, weight 500) at the top of `styles.css`.
-- **Background photos:** `assets/photos/sky-hero.jpg` (hero), `sky-soft.jpg` and `sky-dusk.jpg`
-  (who-it's-for cards, closing section). They are pastel skies rendered for Skolfie (no licence
-  needed). To use your own photos, replace the files with the same names (about 2400x1400 JPEG,
-  under 400 KB).
+- **Background photos:** `assets/photos/hero-blossom.jpg` (landing page, Stockholm waterfront with
+  cherry blossoms) and `try-harbour.jpg` (behind the "Try Skolfie" glass card), each with a `-sm`
+  version for phones. Both are paintings supplied by the site owner. `sky-*.jpg` are rendered pastel
+  skies used on the who-it's-for cards. Keep each file under 400 KB.
 - **Motion:** headline word reveal, scroll fade-ups, count-up numbers, the mock-up's meter and
   highlights animating in, slow drift and parallax on the photos. All of it switches off for
   visitors who ask their device for reduced motion.
