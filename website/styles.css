@@ -91,8 +91,8 @@ p { margin: 0; }
 @media (min-width: 720px) { .nav__inner { padding: 0 12px 0 24px; } }
 .brand { display: inline-flex; align-items: center; color: var(--on-sky); text-decoration: none; border-radius: 6px; }
 .brand:hover { color: var(--sky-700); }
-.logo { display: block; height: 24px; width: auto; transition: transform .3s cubic-bezier(.2,.7,.2,1); }
-.footer .logo { height: 26px; }
+.logo { display: block; height: 26px; width: auto; transition: transform .3s cubic-bezier(.2,.7,.2,1); }
+.footer .logo { height: 28px; }
 .brand:hover .logo { transform: translateY(-1px); }
 .nav__links { display: flex; align-items: center; gap: 4px; }
 .nav__links a:not(.btn) { color: #26313e; text-shadow: 0 0 10px rgba(255, 255, 255, .7); text-decoration: none; font-size: .95rem; font-weight: 500; letter-spacing: -.005em; padding: 9px 14px; border-radius: 999px; transition: color .2s, background .2s; }
