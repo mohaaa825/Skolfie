@@ -10,6 +10,16 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    // Turn on animations only when the viewer allows motion; fall back to a static page if main.js never loads.
+    (function (d) {
+      try {
+        if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        d.documentElement.classList.add("motion");
+        setTimeout(function () { if (!window.__skolfieReady) d.documentElement.classList.remove("motion"); }, 2500);
+      } catch (e) {}
+    })(document);
+  </script>
   <script src="config.js"></script>
   <script src="main.js" defer></script>
 </head>
@@ -38,21 +48,22 @@
   <main id="main">
     <!-- Hero -->
     <section class="hero">
-      <div class="hero__glow" aria-hidden="true"></div>
+      <div class="hero__photo" aria-hidden="true"><div class="hero__img"></div></div>
+      <div class="hero__fade" aria-hidden="true"></div>
       <div class="wrap hero__inner">
         <p class="eyebrow">For teachers and schools</p>
-        <h1>Know when an essay was written by&nbsp;AI.</h1>
-        <p class="lead">Skolfie reads a student text and tells you whether it looks human, AI-generated or mixed, and shows you why. Built for essays and longer texts.</p>
-        <div class="cta">
+        <h1 class="js-words">Know when an essay was written by&nbsp;AI.</h1>
+        <p class="lead" data-reveal>Skolfie reads a student text and tells you whether it looks human, AI-generated or mixed, and shows you why. Built for essays and longer texts.</p>
+        <div class="cta" data-reveal>
           <a class="btn btn--primary js-app" href="#try">Check a text</a>
           <a class="btn btn--ghost" href="#how">See how it works <span aria-hidden="true">→</span></a>
         </div>
-        <p class="backed">Trained on essays from <strong>GPT</strong>, <strong>Claude</strong>, <strong>Gemini</strong> and more, next to thousands of real student essays.</p>
+        <p class="backed" data-reveal>Trained on essays from <strong>GPT</strong>, <strong>Claude</strong>, <strong>Gemini</strong> and more, next to thousands of real student essays.</p>
       </div>
 
       <!-- Product mock-up -->
       <div class="wrap">
-        <figure class="mock" aria-label="Example of a Skolfie result">
+        <figure class="mock" data-reveal aria-label="Example of a Skolfie result">
           <div class="mock__bar">
             <span class="dot"></span><span class="dot"></span><span class="dot"></span>
             <span class="mock__tab">Essay check · Year 9 English</span>
@@ -75,9 +86,9 @@
                   <p class="verdict__value">Mixed</p>
                 </div>
                 <div class="meter" role="img" aria-label="AI likelihood 64 percent">
-                  <div class="meter__fill" style="width:64%"></div>
+                  <div class="meter__fill" style="--w:64%"></div>
                 </div>
-                <p class="verdict__pct">64% AI-like</p>
+                <p class="verdict__pct"><span data-count="64">64</span>% AI-like</p>
               </div>
               <p class="mock__text">
                 Last summer our town had the hottest week anyone could remember, and my grandma had to stay inside with the curtains shut.
@@ -100,9 +111,9 @@
       <div class="wrap">
         <h2 id="numbers-title" class="sr">Test results</h2>
         <div class="numbers__grid">
-          <div class="stat"><p class="stat__value">97–100%</p><p class="stat__label">of AI essays caught from the newest Claude and Gemini models in our tests</p></div>
-          <div class="stat"><p class="stat__value">99.6%</p><p class="stat__label">caught from an AI model Skolfie never saw in training</p></div>
-          <div class="stat"><p class="stat__value">0.2%</p><p class="stat__label">of real student essays wrongly flagged as AI (1 in 585)</p></div>
+          <div class="stat" data-reveal><p class="stat__value"><span data-count="97">97</span>–100%</p><p class="stat__label">of AI essays caught from the newest Claude and Gemini models in our tests</p></div>
+          <div class="stat" data-reveal><p class="stat__value"><span data-count="99.6" data-decimals="1">99.6</span>%</p><p class="stat__label">caught from an AI model Skolfie never saw in training</p></div>
+          <div class="stat" data-reveal><p class="stat__value"><span data-count="0.2" data-decimals="1">0.2</span>%</p><p class="stat__label">of real student essays wrongly flagged as AI (1 in 585)</p></div>
         </div>
         <p class="fine">Held-out test set, November 2026. Results on your own students will differ; see <a href="#responsible">responsible use</a>.</p>
       </div>
@@ -111,11 +122,11 @@
     <!-- How it works -->
     <section class="section" id="how" aria-labelledby="how-title">
       <div class="wrap">
-        <p class="eyebrow">How it works</p>
-        <h2 id="how-title">Several detectors. One clear answer.</h2>
+        <p class="eyebrow" data-reveal>How it works</p>
+        <h2 id="how-title" data-reveal>Several detectors. One clear answer.</h2>
         <p class="sub">Skolfie doesn't rely on a single trick. It combines different ways of reading a text and weighs them into one calibrated score.</p>
 
-        <div class="chips" role="tablist" aria-label="Parts of the detector">
+        <div class="chips" data-reveal role="tablist" aria-label="Parts of the detector">
           <button role="tab" aria-selected="true" aria-controls="p-style" id="t-style">Writing style</button>
           <button role="tab" aria-selected="false" aria-controls="p-lang" id="t-lang" tabindex="-1">Language model</button>
           <button role="tab" aria-selected="false" aria-controls="p-pred" id="t-pred" tabindex="-1">Predictability</button>
@@ -152,30 +163,30 @@
     <section class="section section--tint" id="why" aria-labelledby="why-title">
       <div class="wrap">
         <p class="eyebrow">Why Skolfie</p>
-        <h2 id="why-title">Evidence, not accusations.</h2>
+        <h2 id="why-title" data-reveal>Evidence, not accusations.</h2>
         <div class="grid grid--4">
-          <article class="card">
+          <article class="card" data-reveal>
             <div class="icon icon--blue" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M4 12h16M4 6h16M4 18h10"/></svg>
             </div>
             <h3>Explains itself</h3>
             <p>You see which passages and which traits drove the result, so you can talk to the student about the text itself.</p>
           </article>
-          <article class="card">
+          <article class="card" data-reveal>
             <div class="icon icon--pink" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>
             </div>
             <h3>Careful by default</h3>
             <p>Tuned so that very few honest essays are flagged. When Skolfie is unsure, it says so.</p>
           </article>
-          <article class="card">
+          <article class="card" data-reveal>
             <div class="icon icon--blue" aria-hidden="true">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
             </div>
             <h3>Keeps up with new AI</h3>
             <p>Retrained with essays from the newest chatbots, and tested on models it has never seen.</p>
           </article>
-          <article class="card">
+          <article class="card" data-reveal>
             <div class="icon icon--pink" aria-hidden="true">
               <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
             </div>
@@ -190,19 +201,25 @@
     <section class="section" id="who" aria-labelledby="who-title">
       <div class="wrap">
         <p class="eyebrow">Who it's for</p>
-        <h2 id="who-title">One checker. Every classroom.</h2>
+        <h2 id="who-title" data-reveal>One checker. Every classroom.</h2>
         <div class="grid grid--3">
-          <article class="who who--blue">
+          <article class="who who--photo" data-reveal style="--photo:url(assets/photos/sky-soft.jpg)">
+            <div class="who__glass">
             <h3>Teachers</h3>
             <p>Paste an essay or upload a file, and get a verdict with reasons in seconds.</p>
+            </div>
           </article>
-          <article class="who who--pink">
+          <article class="who who--photo" data-reveal style="--photo:url(assets/photos/sky-dusk.jpg)">
+            <div class="who__glass">
             <h3>Schools</h3>
             <p>Check a whole folder of essays at once and keep a consistent, explainable process.</p>
+            </div>
           </article>
-          <article class="who who--white">
+          <article class="who who--photo" data-reveal style="--photo:url(assets/photos/sky-hero.jpg)">
+            <div class="who__glass">
             <h3>Exam boards</h3>
             <p>Screen coursework at scale, with a cautious cut-off and clear warnings.</p>
+            </div>
           </article>
         </div>
       </div>
@@ -212,20 +229,21 @@
     <section class="section section--tint" id="responsible" aria-labelledby="resp-title">
       <div class="wrap narrow">
         <p class="eyebrow">Responsible use</p>
-        <h2 id="resp-title">A starting point for a conversation.</h2>
+        <h2 id="resp-title" data-reveal>A starting point for a conversation.</h2>
         <p class="sub">No AI detector is proof. Skolfie is built to support a teacher's judgment, never to replace it.</p>
         <ul class="list">
-          <li><strong>Use it alongside what you know.</strong> Drafts, notes and how a student talks about their work matter more than any score.</li>
-          <li><strong>Longer is better.</strong> Texts under 150 words get a warning, and under 30 words get no verdict.</li>
-          <li><strong>Language learners.</strong> Writing by students still learning English is flagged more often. Skolfie shows a warning on those results.</li>
-          <li><strong>English only, for now.</strong> Other languages get a warning instead of a confident verdict.</li>
+          <li data-reveal><strong>Use it alongside what you know.</strong> Drafts, notes and how a student talks about their work matter more than any score.</li>
+          <li data-reveal><strong>Longer is better.</strong> Texts under 150 words get a warning, and under 30 words get no verdict.</li>
+          <li data-reveal><strong>Language learners.</strong> Writing by students still learning English is flagged more often. Skolfie shows a warning on those results.</li>
+          <li data-reveal><strong>English only, for now.</strong> Other languages get a warning instead of a confident verdict.</li>
         </ul>
       </div>
     </section>
 
     <!-- Closing CTA -->
     <section class="section closing" id="try" aria-labelledby="try-title">
-      <div class="wrap narrow center">
+      <div class="closing__photo" aria-hidden="true"></div>
+      <div class="wrap narrow center closing__card" data-reveal>
         <h2 id="try-title">Try Skolfie.</h2>
         <p class="sub js-try-note">Paste a student text and see the verdict and the reasons behind it.</p>
         <div class="cta cta--center">

@@ -8,6 +8,13 @@ Palette: white, baby blue and pink, matching `THEME_TOKENS` in `skolfie/app/grad
   share link from `notebooks/app.ipynb`, or your own server). Empty = the "Open the checker"
   buttons scroll to the "Try Skolfie" section instead.
 - **Contact:** set `contactEmail` in `config.js` to show "Ask about access for your school".
+- **Background photos:** `assets/photos/sky-hero.jpg` (hero), `sky-soft.jpg` and `sky-dusk.jpg`
+  (who-it's-for cards, closing section). They are pastel skies rendered for Skolfie (no licence
+  needed). To use your own photos, replace the files with the same names (about 2400x1400 JPEG,
+  under 400 KB).
+- **Motion:** headline word reveal, scroll fade-ups, count-up numbers, the mock-up's meter and
+  highlights animating in, slow drift and parallax on the photos. All of it switches off for
+  visitors who ask their device for reduced motion.
 - **Preview locally:** `python -m http.server -d website 8000`, then open http://localhost:8000.
 - **Publish:** GitHub Pages via `.github/workflows/pages.yml`. Once: Settings -> Pages ->
   Source "GitHub Actions". Each push to `main` that touches `website/` redeploys.

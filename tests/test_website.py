@@ -70,3 +70,21 @@ def test_palette_has_blue_and_pink():
     css = (SITE / "styles.css").read_text(encoding="utf-8").lower()
     assert "#7cc4f2" in css  # baby blue, same as the app
     assert "--pink-300" in css
+
+
+def test_background_photos_referenced_in_css_and_html_exist():
+    css = (SITE / "styles.css").read_text(encoding="utf-8")
+    html_text = (SITE / "index.html").read_text(encoding="utf-8")
+    refs = set(re.findall(r"url\((assets/[^)]+)\)", css + html_text))
+    assert refs, "expected background photos"
+    for ref in refs:
+        path = SITE / ref
+        assert path.is_file(), ref
+        assert path.stat().st_size < 400_000, f"{ref} is too heavy for a background"
+
+
+def test_motion_respects_reduced_motion():
+    css = (SITE / "styles.css").read_text(encoding="utf-8")
+    html_text = (SITE / "index.html").read_text(encoding="utf-8")
+    assert "prefers-reduced-motion: reduce" in css
+    assert "prefers-reduced-motion: reduce" in html_text
