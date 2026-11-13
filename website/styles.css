@@ -379,3 +379,6 @@ mark { background: var(--pink-100); color: inherit; padding: 1px 3px; border-rad
 @media (max-width: 720px) {
   .closing__card { width: calc(100% - 32px); }
 }
+
+/* Temporary marker on draft sections; remove the tag in index.html once the wording is final. */
+.draft-tag { display: inline-block; margin-left: 8px; padding: 2px 9px; border-radius: 999px; background: var(--pink-50); border: 1px dashed var(--pink-700); color: var(--pink-700); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; vertical-align: 1px; }
