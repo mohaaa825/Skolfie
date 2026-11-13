@@ -65,9 +65,28 @@
   links.addEventListener("click", function (e) {
     if (e.target.closest("a")) setMenu(false);
   });
+  function menuOpen() { return toggle.getAttribute("aria-expanded") === "true"; }
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") setMenu(false);
+    if (e.key !== "Escape" || !menuOpen()) return;
+    // Hand focus back to the toggle, or it would be lost on a now-hidden link.
+    var inside = links.contains(document.activeElement);
+    setMenu(false);
+    if (inside || document.activeElement === toggle) toggle.focus();
   });
+  // Close when keyboard focus or a tap moves outside the menu.
+  document.addEventListener("focusin", function (e) {
+    if (menuOpen() && !links.contains(e.target) && e.target !== toggle) setMenu(false);
+  });
+  document.addEventListener("click", function (e) {
+    if (menuOpen() && !links.contains(e.target) && !toggle.contains(e.target)) setMenu(false);
+  });
+  // Reset the menu when the window grows to the desktop layout.
+  if (window.matchMedia) {
+    var desktop = matchMedia("(min-width: 821px)");
+    var onDesktop = function () { if (desktop.matches) setMenu(false); };
+    if (desktop.addEventListener) desktop.addEventListener("change", onDesktop);
+    else if (desktop.addListener) desktop.addListener(onDesktop);
+  }
 
   // ---------- Motion ----------
   var root = document.documentElement;
