@@ -13,19 +13,26 @@
     }
   }
 
-  // App link: every .js-app button opens the checker when a link is set.
   var appUrl = safeHttpUrl(cfg.appUrl);
+  var email = String(cfg.contactEmail || "").trim();
+  var hasEmail = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(email);
+  var accessMail = hasEmail ? "mailto:" + email + "?subject=" + encodeURIComponent("Skolfie for our school") : "";
+
+  // App buttons say "Request access" until the checker is public. With a link set, they open the
+  // checker and switch to their live label; without one, they email us (or scroll to "Try Skolfie").
   document.querySelectorAll(".js-app").forEach(function (a) {
     if (appUrl) {
       a.href = appUrl;
       a.target = "_blank";
       a.rel = "noopener";
+      var live = a.getAttribute("data-live-label");
+      if (live) a.textContent = live;
     } else if (a.classList.contains("js-app-strict")) {
       a.hidden = true;
+    } else if (accessMail) {
+      a.href = accessMail;
     }
   });
-  var email = String(cfg.contactEmail || "").trim();
-  var hasEmail = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(email);
   if (!appUrl) {
     var note = document.querySelector(".js-try-note");
     if (note) {
@@ -36,8 +43,8 @@
   }
 
   document.querySelectorAll(".js-contact").forEach(function (a) {
-    if (hasEmail) {
-      a.href = "mailto:" + email + "?subject=" + encodeURIComponent("Skolfie for our school");
+    if (accessMail) {
+      a.href = accessMail;
     } else {
       a.hidden = true;
     }
@@ -92,47 +99,9 @@
   var root = document.documentElement;
   var motion = root.classList.contains("motion");
 
-  // Headline: reveal word by word.
-  var words = document.querySelector(".js-words");
-  if (motion && words) {
-    var label = words.textContent;
-    words.setAttribute("aria-label", label);
-    words.textContent = "";
-    label.split(" ").forEach(function (w, i, all) {
-      var span = document.createElement("span");
-      span.className = "word";
-      span.setAttribute("aria-hidden", "true");
-      span.style.setProperty("--i", i);
-      span.textContent = w;
-      words.appendChild(span);
-      if (i < all.length - 1) words.appendChild(document.createTextNode(" "));
-    });
-  }
-
-  // Count-up numbers.
-  function countUp(el) {
-    var target = parseFloat(el.getAttribute("data-count"));
-    var decimals = parseInt(el.getAttribute("data-decimals") || "0", 10);
-    if (!motion || isNaN(target)) return;
-    var start = null, dur = 1400;
-    function step(ts) {
-      if (start === null) start = ts;
-      var t = Math.min(1, (ts - start) / dur);
-      var eased = 1 - Math.pow(1 - t, 3);
-      el.textContent = (target * eased).toFixed(decimals);
-      if (t < 1) requestAnimationFrame(step);
-    }
-    el.textContent = (0).toFixed(decimals);
-    requestAnimationFrame(step);
-  }
-
-  // Scroll reveal, staggered inside each group.
+  // Scroll reveal: a short, quiet fade, staggered inside each group.
   var revealEls = Array.prototype.slice.call(document.querySelectorAll("[data-reveal]"));
-  function reveal(el) {
-    if (el.classList.contains("is-in")) return;
-    el.classList.add("is-in");
-    Array.prototype.forEach.call(el.querySelectorAll("[data-count]"), countUp);
-  }
+  function reveal(el) { el.classList.add("is-in"); }
   if (motion && "IntersectionObserver" in window) {
     revealEls.forEach(function (el) {
       var sibs = Array.prototype.filter.call(el.parentNode.children, function (c) { return c.hasAttribute("data-reveal"); });
@@ -147,26 +116,6 @@
     revealEls.forEach(function (el) { io.observe(el); });
   } else {
     revealEls.forEach(function (el) { el.classList.add("is-in"); });
-  }
-
-  // Gentle parallax on the background photos.
-  var layers = Array.prototype.slice.call(document.querySelectorAll(".hero__img, .closing__photo"));
-  if (motion && layers.length) {
-    var ticking = false;
-    function parallax() {
-      ticking = false;
-      var vh = window.innerHeight;
-      layers.forEach(function (el) {
-        var r = el.parentNode.getBoundingClientRect();
-        if (r.bottom < 0 || r.top > vh) return;
-        var offset = (r.top + r.height / 2 - vh / 2) * -0.12;
-        el.style.setProperty("--parallax", offset.toFixed(1) + "px");
-      });
-    }
-    window.addEventListener("scroll", function () {
-      if (!ticking) { ticking = true; requestAnimationFrame(parallax); }
-    }, { passive: true });
-    parallax();
   }
 
   window.__skolfieReady = true;

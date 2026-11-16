@@ -30,7 +30,7 @@
   <header class="nav" id="top">
     <div class="wrap nav__inner">
       <a class="brand" href="#top" aria-label="Skolfie home">
-        <img class="logo" src="assets/logo.svg" alt="Skolfie" width="113" height="26">
+        <img class="logo" src="assets/logo.svg" alt="Skolfie" width="125" height="29">
       </a>
       <button class="nav__toggle" aria-expanded="false" aria-controls="nav-links">
         <span class="sr">Menu</span><span class="bars" aria-hidden="true"></span>
@@ -40,7 +40,7 @@
         <a href="#why">Why Skolfie</a>
         <a href="#who">Who it's for</a>
         <a href="#responsible">Responsible use</a>
-        <a class="btn btn--pill btn--small js-app" href="#try">Open the checker</a>
+        <a class="btn btn--pill btn--small js-app" href="#try" data-live-label="Open the checker">Request access</a>
       </nav>
     </div>
   </header>
@@ -48,17 +48,18 @@
   <main id="main">
     <!-- Hero -->
     <section class="hero">
-      <div class="hero__photo" aria-hidden="true"><div class="hero__img"></div></div>
-      <div class="hero__fade" aria-hidden="true"></div>
+      <div class="hero__bg" aria-hidden="true"></div>
       <div class="wrap hero__inner">
-        <h1 class="js-words">Know when an essay was written by&nbsp;AI.</h1>
+        <h1>See whether an essay reads as AI&#8209;written, and&nbsp;why.</h1>
         <div class="cta" data-reveal>
-          <a class="btn btn--primary js-app" href="#try">Check a text</a>
+          <a class="btn btn--primary js-app" href="#try" data-live-label="Check a text">Request access</a>
           <a class="btn btn--ghost" href="#how">See how it works <span aria-hidden="true">→</span></a>
         </div>
       </div>
+    </section>
 
-      <!-- Product mock-up -->
+    <!-- Product mock-up: its own section, so the first screen belongs to the headline -->
+    <section class="example" aria-label="Example result">
       <div class="wrap">
         <figure class="mock" data-reveal aria-label="Example of a Skolfie result">
           <div class="mock__bar">
@@ -108,11 +109,11 @@
       <div class="wrap">
         <h2 id="numbers-title" class="sr">Test results</h2>
         <div class="numbers__grid">
-          <div class="stat" data-reveal><p class="stat__value"><span data-count="97">97</span>–100%</p><p class="stat__label">of AI essays caught from the newest Claude and Gemini</p></div>
-          <div class="stat" data-reveal><p class="stat__value"><span data-count="99.6" data-decimals="1">99.6</span>%</p><p class="stat__label">caught from an AI model never seen in training</p></div>
-          <div class="stat" data-reveal><p class="stat__value">1 in <span data-count="585">585</span></p><p class="stat__label">real student essays wrongly flagged (0.17%)</p></div>
+          <div class="stat" data-reveal><p class="stat__value">97%+</p><p class="stat__label">of AI essays caught, for each of the newest Claude and Gemini models we tested</p></div>
+          <div class="stat" data-reveal><p class="stat__value">99.6%</p><p class="stat__label">of AI essays caught from a model left out of training</p></div>
+          <div class="stat" data-reveal><p class="stat__value">0.17%</p><p class="stat__label">of real student essays in the test wrongly flagged as AI</p></div>
         </div>
-        <p class="fine">Held-out test set, Nov 2026. Results on your own students may differ (<a href="#responsible">responsible use</a>).</p>
+        <p class="fine">Held-out test set, Nov 2026. Test sets this size carry a margin of error, and results on your own students may differ (<a href="#responsible">responsible use</a>).</p>
       </div>
     </section>
 
@@ -145,7 +146,7 @@
           </div>
           <div class="panel" role="tabpanel" id="p-mixed" aria-labelledby="t-mixed" hidden>
             <h3>Mixed texts</h3>
-            <p>Long texts are checked in chunks. Partly AI essays get a Mixed label, with the AI passages highlighted. (Being retrained for the newest models.)</p>
+            <p>Long texts are checked in chunks. Partly AI essays get a Mixed label, with the AI passages highlighted.</p>
           </div>
           <div class="panel" role="tabpanel" id="p-why" aria-labelledby="t-why" hidden>
             <h3>Reasons you can read</h3>
@@ -239,7 +240,7 @@
     <!-- Privacy & data (DRAFT: wording not final, check with a lawyer before launch) -->
     <section class="section" id="privacy" aria-labelledby="privacy-title">
       <div class="wrap narrow">
-        <p class="eyebrow" data-reveal>Privacy &amp; data <span class="draft-tag">Draft</span></p>
+        <p class="eyebrow" data-reveal>Privacy &amp; data</p>
         <h2 id="privacy-title" data-reveal>Student texts stay private.</h2>
         <p class="sub" data-reveal>Built with GDPR in mind.</p>
         <ul class="list">
@@ -258,7 +259,7 @@
         <p class="sub js-try-note">Paste a text. See the verdict and why.</p>
         <div class="cta cta--center">
           <a class="btn btn--primary js-app js-app-strict" href="#try">Open the checker</a>
-          <a class="btn btn--ghost js-contact" href="#try">Access for schools</a>
+          <a class="btn btn--ghost js-contact" href="#try">Request access</a>
         </div>
       </div>
     </section>
@@ -267,7 +268,7 @@
   <footer class="footer">
     <div class="wrap footer__inner">
       <div>
-        <a class="brand" href="#top" aria-label="Skolfie home"><img class="logo" src="assets/logo.svg" alt="Skolfie" width="113" height="26"></a>
+        <a class="brand" href="#top" aria-label="Skolfie home"><img class="logo" src="assets/logo.svg" alt="Skolfie" width="125" height="29"></a>
         <p class="footer__tag">AI-text checker for teachers.</p>
       </div>
       <div class="footer__cols">
@@ -275,7 +276,7 @@
           <p class="footer__head">Product</p>
           <a href="#how">How it works</a>
           <a href="#why">Why Skolfie</a>
-          <a class="js-app" href="#try">Open the checker</a>
+          <a class="js-app" href="#try" data-live-label="Open the checker">Request access</a>
         </div>
         <div>
           <p class="footer__head">Use it well</p>
