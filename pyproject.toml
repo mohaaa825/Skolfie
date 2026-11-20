@@ -27,7 +27,7 @@ skolfie = "skolfie.cli:main"
 # transformer backbone; a pickled model reloads from its saved tokenizer.json.
 app = ["gradio>=4", "sentencepiece>=0.1.99", "protobuf>=3.20"]
 data = ["huggingface_hub>=0.20", "gdown>=5"]
-generate = ["requests>=2.31"]
+generate = ["requests>=2.31", "google-genai>=1.30"]
 features = ["lightgbm>=4", "torch>=2.1", "transformers>=4.40", "sentencepiece>=0.1.99",
             "protobuf>=3.20"]
 dev = ["pytest", "ruff", "lightgbm>=4"]
