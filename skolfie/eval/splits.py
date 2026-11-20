@@ -250,6 +250,10 @@ _GROUP_RULES: dict[str, list[tuple[re.Pattern[str], str]]] = {
     ],
     # fresh:<generator, may contain ':'>:<template>.<slots>.<style>.w<N>.t<T>:<i>
     "fresh": [(re.compile(r"^fresh:.+:([^:.]+\.[^:.]+)\.[^:]+:\d+$"), r"fresh:\1")],
+    # theses:<repo>:<slug>:s<k> -> theses:<repo>:<slug>: the sections of one thesis together
+    "theses": [(re.compile(r"^(theses:[^:]+:.+):s\d+$"), r"\1")],
+    # pes2o:<paper id>:s<k> -> pes2o:<paper id>
+    "pes2o": [(re.compile(r"^(pes2o:.+):s\d+$"), r"\1")],
 }
 
 #: Column with `skolfie.eval.near_dup.cluster_ids` labels (-1 = none), added by

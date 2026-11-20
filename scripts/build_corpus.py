@@ -46,6 +46,9 @@ def _drop_error_records(record: logging.LogRecord) -> bool:
     return record.levelno < logging.ERROR
 
 
+OPT_IN_SOURCES = {"pes2o", "theses"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Build the skolfie training corpus (Parquet + manifest) from public datasets."
@@ -71,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--persuade-max-essays", type=int, default=None, metavar="N",
                         help="keep at most N PERSUADE essays, equally many per prompt "
                              "(default: 4000; 0 keeps all 25k)")
+    parser.add_argument("--persuade-keep-min-words", type=int, default=None, metavar="N",
+                        help="also keep every PERSUADE essay of at least N words, on top of "
+                             "--persuade-max-essays")
+    parser.add_argument("--source-option", action="append", default=[], metavar="SRC.KEY=VAL",
+                        help="extra loader option, e.g. pes2o.max_texts=3000 (repeatable; "
+                             "integer values are converted)")
     parser.add_argument("-q", "--quiet", action="store_true", help="only print errors and stats")
     return parser
 
@@ -102,7 +111,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.sources:
         names = [n.strip() for n in args.sources.split(",") if n.strip()]
     else:
-        names = list(registry)
+        # Long-text sources download or harvest a lot: only when named in --sources.
+        names = [n for n in registry if n not in OPT_IN_SOURCES]
     unknown = [n for n in names if n not in registry]
     if unknown or not names:
         parser.error(
@@ -122,6 +132,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   file=sys.stderr)
     elif "persuade" in names:
         source_options["persuade"] = {"seed": args.seed}
+    if args.persuade_keep_min_words and "persuade" in names:
+        source_options["persuade"]["keep_min_words"] = args.persuade_keep_min_words
+    for item in args.source_option:
+        try:
+            key, value = item.split("=", 1)
+            src, opt = key.split(".", 1)
+        except ValueError:
+            parser.error(f"invalid --source-option {item!r}; use SRC.KEY=VALUE")
+        if src not in names:
+            print(f"warning: --source-option {item} ignored: {src} is not in --sources",
+                  file=sys.stderr)
+            continue
+        source_options.setdefault(src, {})[opt] = int(value) if value.lstrip("-").isdigit() \
+            else value
 
     try:
         result = corpus.build_corpus(

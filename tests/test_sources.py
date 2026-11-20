@@ -39,7 +39,8 @@ def _untag(id_: str) -> str:
 # --------------------------------------------------------------------- registry
 
 def test_registry_and_interface():
-    assert set(SOURCES) == {"hc3", "m4gt", "autextification", "persuade", "fresh"}
+    assert set(SOURCES) == {"hc3", "m4gt", "autextification", "persuade", "fresh", "pes2o",
+                            "theses"}
     assert get_source("HC3") is hc3
     with pytest.raises(KeyError, match="unknown source"):
         get_source("nope")

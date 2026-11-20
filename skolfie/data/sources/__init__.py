@@ -17,10 +17,10 @@ from __future__ import annotations
 
 from types import ModuleType
 
-from skolfie.data.sources import autextification, fresh, hc3, m4gt, persuade
+from skolfie.data.sources import autextification, fresh, hc3, m4gt, persuade, pes2o, theses
 
 SOURCES: dict[str, ModuleType] = {
-    m.NAME: m for m in (hc3, m4gt, autextification, persuade, fresh)
+    m.NAME: m for m in (hc3, m4gt, autextification, persuade, fresh, pes2o, theses)
 }
 
 

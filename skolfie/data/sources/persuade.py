@@ -33,7 +33,9 @@ Cap: `load(..., max_essays=N)` keeps at most N essays (default
 the prompts allow (a prompt with fewer essays than its share gives the rest
 to the others), chosen with a seeded RNG over the sorted essay ids, so the
 same files and seed always give the same essays. Equal per-prompt counts
-match the AI essays, which are spread evenly over the 15 prompts. The cap
+match the AI essays, which are spread evenly over the 15 prompts.
+`keep_min_words=N` (`--persuade-keep-min-words`) adds every essay of at least
+N words on top of the cap, since long human essays are rare. The cap
 keeps the human student essays from swamping the much smaller set of modern
 AI essays. `scripts/build_corpus.py --persuade-max-essays` sets it.
 
@@ -279,8 +281,11 @@ def stratified_cap(by_prompt: dict[str, list[str]], max_essays: int | None,
 
 
 def load(raw_dir: Path, download: bool = True, max_essays: int | None = DEFAULT_MAX_ESSAYS,
-         seed: int = 0) -> Iterator[Record]:
-    """Yield human student-essay Records from `raw_dir/persuade/` (see the module docstring)."""
+         seed: int = 0, keep_min_words: int | None = None) -> Iterator[Record]:
+    """Yield human student-essay Records from `raw_dir/persuade/` (see the module docstring).
+
+    `keep_min_words`: essays with at least this many words are always kept, on top of the
+    `max_essays` cap (long human essays are rare and the AI essays are long)."""
     if max_essays is not None and max_essays < 0:
         raise ValueError(f"max_essays must be >= 0 (0 keeps all), got {max_essays}")
     directory = Path(raw_dir) / NAME
@@ -297,6 +302,11 @@ def load(raw_dir: Path, download: bool = True, max_essays: int | None = DEFAULT_
     for essay_id, e in essays.items():
         by_prompt[e["prompt"]].append(essay_id)
     keep = stratified_cap(by_prompt, max_essays, seed)
+    if keep_min_words:
+        long_ids = {i for i, e in essays.items() if len(e["text"].split()) >= keep_min_words}
+        log.info("persuade: %d essays have >= %d words; %d of them were not in the cap and are "
+                 "added", len(long_ids), keep_min_words, len(long_ids - keep))
+        keep |= long_ids
     if len(keep) < len(essays):
         per_prompt = Counter(essays[i]["prompt"] for i in keep)
         log.info("persuade: kept %d of %d essays (max_essays=%s): %s", len(keep), len(essays),

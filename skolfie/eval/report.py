@@ -290,6 +290,7 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
                    extra_train: pd.DataFrame | None = None,
                    oversample: dict[str, int] | None = None,
                    keep_sources: Sequence[str] | None = None,
+                   length_match: dict[str, Any] | None = None,
                    log: Any = print) -> tuple[dict[str, Any], pd.DataFrame]:
     """Fit on `train`, score every eval split. Returns (report dict, predictions frame).
 
@@ -303,6 +304,10 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
 
     `keep_sources` (corpus `source` values) are never sampled away by
     `max_train` / `max_eval` (see `sample_keeping`).
+
+    `length_match` (keyword arguments of `skolfie.eval.length_match.length_match_rows`, e.g.
+    {"sources": ["fresh"], "reference_sources": ["persuade", "theses"], "prob": 0.5}) crops
+    some AI train texts, after oversampling, to human lengths.
     """
     started = time.time()
     manifest = splits_manifest or {}
@@ -345,6 +350,14 @@ def run_evaluation(scorer: Any, corpus: pd.DataFrame, splits: pd.DataFrame, *,
             log(f"[fit] oversampling: + {over_info['n_added']} copies ("
                 + ", ".join(f"{k} {n} rows x{over_info['factors'][k]}"
                             for k, n in over_info["rows"].items()) + ")")
+        if length_match:
+            from skolfie.eval.length_match import length_match_rows
+
+            fit_df, lm_info = length_match_rows(fit_df, **{"seed": seed, **length_match})
+            train_info["length_match"] = lm_info
+            log(f"[fit] length matching: cropped {lm_info.get('n_cropped', 0)} of "
+                f"{lm_info.get('n_candidates', 0)} AI texts (median words "
+                f"{lm_info.get('median_words_before')} -> {lm_info.get('median_words_after')})")
         texts, labels = fit_df["text"].tolist(), fit_df["label"].tolist()
         del fit_df
         if extra_train is not None:

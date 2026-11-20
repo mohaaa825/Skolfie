@@ -185,6 +185,16 @@ def build_parser() -> argparse.ArgumentParser:
                              "away (e.g. fresh,persuade); only the other rows are sampled, "
                              "stratified by label, to fill the rest. Comma-separated or "
                              "repeatable.")
+    parser.add_argument("--length-match", metavar="SOURCES",
+                        help="Crop some AI train texts of these corpus sources (e.g. fresh) to "
+                             "lengths drawn from human train texts, so text length is no "
+                             "shortcut. Evaluation splits are unchanged.")
+    parser.add_argument("--length-match-ref", metavar="SOURCES",
+                        help="Human sources to take the lengths from (e.g. persuade,theses); "
+                             "default: human train rows of the same domain.")
+    parser.add_argument("--length-match-prob", type=float, default=0.5,
+                        help="Share of those AI texts (each oversampled copy on its own) that "
+                             "is cropped (default: 0.5).")
     group = parser.add_argument_group("feature and transformer models (features, transformer, ...)")
     group.add_argument("--cache-dir", type=Path,
                        help="Cache per-text style/GPT-2 features here (parquet keyed by text "
@@ -314,6 +324,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
     keep_sources = parse_keep_sources(args.keep_sources)
+    length_match = None
+    if args.length_match:
+        if not 0 <= args.length_match_prob <= 1:
+            parser.error("--length-match-prob must be in [0, 1]")
+        length_match = {"sources": parse_keep_sources([args.length_match]),
+                        "prob": args.length_match_prob}
+        if args.length_match_ref:
+            length_match["reference_sources"] = parse_keep_sources([args.length_match_ref])
     if args.bino_observer and args.model not in FEATURE_MODELS:
         parser.error("--bino-observer is for the feature models only "
                      f"({', '.join(FEATURE_MODELS)}); the transformer keeps its own features")
@@ -350,6 +368,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             splits_path=args.splits, splits_manifest=manifest, max_train=args.max_train,
             max_eval=args.max_eval, seed=args.seed, extra_train=extra_train,
             oversample=oversample or None, keep_sources=keep_sources or None,
+            length_match=length_match,
         )
     except ValueError as exc:
         if keep_sources and "cannot keep source" in str(exc):
