@@ -600,3 +600,16 @@ def test_evaluate_cli_keep_sources(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit):
         evaluate.main([*args, "--out-dir", str(tmp_path / "bad"),
                        "--bino-performer", "Qwen/Qwen2.5-1.5B-Instruct"])
+
+
+def test_persuade_keep_min_words_adds_long_essays_on_top_of_the_cap(tmp_path: Path) -> None:
+    sizes = {"Phones and driving": 6, "Exploring Venus": 6}
+    _write_persuade_csv(tmp_path / "persuade" / "train.csv", sizes)
+    every = list(persuade.load(tmp_path, download=False, max_essays=0))
+    words = sorted(len(r.text.split()) for r in every)
+    threshold = words[-3]                      # the 3+ longest essays
+    long_ids = {r.id for r in every if len(r.text.split()) >= threshold}
+    capped = {r.id for r in persuade.load(tmp_path, download=False, max_essays=2)}
+    both = {r.id for r in persuade.load(tmp_path, download=False, max_essays=2,
+                                        keep_min_words=threshold)}
+    assert both == capped | long_ids and len(both) > len(capped)
