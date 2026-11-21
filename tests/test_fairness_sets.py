@@ -8,7 +8,6 @@ into the cache directory, and `download` / `urlopen` are monkeypatched.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import urllib.error
 from pathlib import Path
@@ -19,8 +18,7 @@ import pytest
 from skolfie.data import fairness_sets as fs
 from skolfie.data.corpus import normalized_hash
 from skolfie.data.schema import COLUMNS, DOMAINS
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests.conftest import load_script
 
 ELLIPSE_HEADER = (
     "text_id_kaggle,full_text,gender,grade,race_ethnicity,num_words,task,SES,prompt,Overall,"
@@ -313,18 +311,8 @@ def test_source_metadata():
 
 # ------------------------------------------------------------------ script
 
-def _load_script():
-    spec = importlib.util.spec_from_file_location(
-        "skolfie_build_fairness_sets_script", REPO_ROOT / "scripts" / "build_fairness_sets.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_script_drops_corpus_overlap_and_writes_manifest(cache, tmp_path, no_network, capsys):
-    script = _load_script()
+    script = load_script("build_fairness_sets")
     # The corpus holds one TOEFL essay (with different case/punctuation) and one
     # ELLIPSE essay: both must be dropped from the fairness sets.
     corpus = tmp_path / "corpus.parquet"
@@ -374,7 +362,7 @@ def test_script_drops_corpus_overlap_and_writes_manifest(cache, tmp_path, no_net
 
 
 def test_script_without_corpus_and_errors(cache, tmp_path, monkeypatch, capsys):
-    script = _load_script()
+    script = load_script("build_fairness_sets")
     out = tmp_path / "o" / "f.parquet"
     monkeypatch.setattr(fs, "download", lambda url, dest, **kw: pytest.fail("download"))
     assert script.main(["-q", "--out", str(out), "--cache-dir", str(cache),

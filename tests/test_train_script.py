@@ -6,29 +6,20 @@ Smoke test for scripts/train.py (trains on the synthetic seed fixture).
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+from tests.conftest import load_script
+
 pytest.importorskip("skolfie.features.burrows_delta")
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _load_train_module():
-    spec = importlib.util.spec_from_file_location("skolfie_train_script",
-                                                  REPO_ROOT / "scripts" / "train.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
 
 
 @pytest.fixture(scope="module")
 def train():
-    return _load_train_module()
+    return load_script("train")
 
 
 def test_seed_demo_writes_model(train, tmp_path: Path) -> None:
@@ -75,3 +66,27 @@ def test_rejects_single_class(train, tmp_path: Path) -> None:
     data = tmp_path / "one_class.csv"
     pd.DataFrame({"text": ["only human text here"], "label": ["human"]}).to_csv(data, index=False)
     assert train.main(["--data", str(data), "--out", str(tmp_path / "m.joblib")]) == 2
+
+
+def test_drop_duplicate_texts_last_wins(train) -> None:
+    texts, labels, dropped = train.drop_duplicate_texts(
+        ["a", "b", "a", "c"], ["human", "ai", "ai", "human"])
+    assert (texts, labels, dropped) == (["b", "a", "c"], ["ai", "ai", "human"], 1)
+
+
+def test_rejects_bad_paths_before_training(train, tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        train.main(["--data", str(tmp_path / "missing.csv")])
+    with pytest.raises(SystemExit):
+        train.main(["--feedback", str(tmp_path / "missing.csv")])
+    with pytest.raises(SystemExit):
+        train.main(["--seed-demo", "--out", str(tmp_path)])
+
+
+def test_test_size_too_small_is_clean_error(train, tmp_path: Path) -> None:
+    data = tmp_path / "tiny.csv"
+    pd.DataFrame({"text": ["h one", "h two", "a one", "a two"],
+                  "label": ["human", "human", "ai", "ai"]}).to_csv(data, index=False)
+    out = tmp_path / "m.joblib"
+    assert train.main(["--data", str(data), "--test-size", "0.2", "--out", str(out)]) == 2
+    assert not out.exists()

@@ -58,7 +58,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 
-from skolfie.data.schema import Record
+from skolfie.data.schema import Record, count_words
 from skolfie.data.sources._common import first_key, missing_files_error, split_from_name
 
 log = logging.getLogger(__name__)
@@ -303,7 +303,7 @@ def load(raw_dir: Path, download: bool = True, max_essays: int | None = DEFAULT_
         by_prompt[e["prompt"]].append(essay_id)
     keep = stratified_cap(by_prompt, max_essays, seed)
     if keep_min_words:
-        long_ids = {i for i, e in essays.items() if len(e["text"].split()) >= keep_min_words}
+        long_ids = {i for i, e in essays.items() if count_words(e["text"]) >= keep_min_words}
         log.info("persuade: %d essays have >= %d words; %d of them were not in the cap and are "
                  "added", len(long_ids), keep_min_words, len(long_ids - keep))
         keep |= long_ids

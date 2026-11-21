@@ -1,16 +1,24 @@
 """
 tests/test_file_parsers.py
 ---------------------------
-Text extraction from .txt / .docx / .pdf uploads.
+Text extraction from .txt / .docx / .pdf uploads, and the limits and errors
+for oversized, malformed or protected files.
 """
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 import pytest
 
-from skolfie.data.file_parsers import extract_text_from_file, read_txt
+from skolfie.data.file_parsers import (
+    FileParseError,
+    extract_text_from_file,
+    read_docx,
+    read_pdf,
+    read_txt,
+)
 
 SAMPLE = "Café déjà vu: naïve résumé."
 
@@ -94,3 +102,90 @@ def test_unsupported_extension(tmp_path: Path) -> None:
 
 def test_empty_path_returns_empty_string() -> None:
     assert extract_text_from_file("") == ""
+
+
+# --------------------------------------------------------------------------- #
+# Upload limits and malformed files
+# --------------------------------------------------------------------------- #
+def _docx_with_padding(tmp_path: Path, pad_bytes: int) -> Path:
+    docx = pytest.importorskip("docx")
+    document = docx.Document()
+    document.add_paragraph("Hello docx.")
+    src = tmp_path / "src.docx"
+    document.save(str(src))
+    out = tmp_path / "padded.docx"
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "word/document.xml":
+                data = data.replace(b"<w:body>", b"<w:body>" + b" " * pad_bytes)
+            zout.writestr(item, data)
+    return out
+
+
+def test_docx_zip_bomb_rejected_before_unpacking(tmp_path: Path) -> None:
+    bomb = _docx_with_padding(tmp_path, 60 * 1024 * 1024)
+    assert bomb.stat().st_size < 1024 * 1024  # tiny upload, huge once unpacked
+    with pytest.raises(FileParseError, match="too large once unpacked"):
+        extract_text_from_file(bomb)
+
+
+def test_docx_small_padding_still_reads(tmp_path: Path) -> None:
+    assert read_docx(str(_docx_with_padding(tmp_path, 1000))) == "Hello docx."
+
+
+def test_oversized_file_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "big.txt"
+    path.write_text("word " * 1000)
+    with pytest.raises(FileParseError, match="too large"):
+        extract_text_from_file(path, max_bytes=100)
+
+
+@pytest.mark.parametrize("name, content", [
+    ("fake.docx", b"plain text, not a zip"),
+    ("fake.pdf", b"plain text, not a pdf"),
+    ("binary.txt", bytes(range(256)) * 4),
+])
+def test_content_must_match_extension(tmp_path: Path, name: str, content: bytes) -> None:
+    pytest.importorskip("docx")
+    pytest.importorskip("pypdf")
+    path = tmp_path / name
+    path.write_bytes(content)
+    with pytest.raises(FileParseError) as info:
+        extract_text_from_file(path)
+    assert str(tmp_path) not in str(info.value)
+
+
+def test_corrupt_pdf_body_gives_safe_error(tmp_path: Path) -> None:
+    pytest.importorskip("pypdf")
+    path = tmp_path / "broken.pdf"
+    path.write_bytes(b"%PDF-1.4\n garbage without xref")
+    with pytest.raises(FileParseError, match="Could not read this .pdf") as info:
+        extract_text_from_file(path)
+    assert str(tmp_path) not in str(info.value)
+
+
+def test_password_protected_pdf(tmp_path: Path) -> None:
+    pypdf = pytest.importorskip("pypdf")
+    src = tmp_path / "plain.pdf"
+    src.write_bytes(_minimal_pdf("Secret words"))
+    writer = pypdf.PdfWriter(clone_from=str(src))
+    writer.encrypt(user_password="hunter2", owner_password="owner")
+    locked = tmp_path / "locked.pdf"
+    writer.write(str(locked))
+    with pytest.raises(FileParseError, match="password-protected"):
+        extract_text_from_file(locked)
+
+
+def test_pdf_page_cap(tmp_path: Path) -> None:
+    pypdf = pytest.importorskip("pypdf")
+    src = tmp_path / "one.pdf"
+    src.write_bytes(_minimal_pdf("Page text"))
+    writer = pypdf.PdfWriter(clone_from=str(src))
+    for _ in range(4):
+        writer.add_page(writer.pages[0])
+    many = tmp_path / "many.pdf"
+    writer.write(str(many))
+    with pytest.raises(FileParseError, match="5 pages; the limit is 3"):
+        read_pdf(str(many), max_pages=3)
+    assert read_pdf(str(many)).count("Page text") == 5

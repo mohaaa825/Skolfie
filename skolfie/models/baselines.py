@@ -37,23 +37,12 @@ import math
 import os
 import re
 from pathlib import Path
-from typing import Any, Protocol, Sequence, runtime_checkable
+from typing import Any, Sequence
 
 import numpy as np
 
 from skolfie.eval.metrics import to_binary
 from skolfie.robust.normalize import normalize_for_scoring
-
-
-@runtime_checkable
-class Scorer(Protocol):
-    name: str
-    pretrained: bool
-
-    def fit(self, texts: Sequence[str], labels: Sequence[Any]) -> "Scorer": ...
-
-    def predict_proba(self, texts: Sequence[str]) -> np.ndarray: ...
-
 
 # --------------------------------------------------------------------------- #
 # Length / shallow-statistics floor

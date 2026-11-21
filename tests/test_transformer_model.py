@@ -656,7 +656,7 @@ def test_evaluate_cli_transformer_options_and_kept_sources(tokenizer, corpus, tm
     import pandas as pd
 
     import skolfie.models.baselines as baselines
-    from tests.test_modern_data import _script
+    from tests.conftest import load_script
 
     train, _ = corpus
     df = train.copy()
@@ -682,7 +682,7 @@ def test_evaluate_cli_transformer_options_and_kept_sources(tokenizer, corpus, tm
         return model
 
     monkeypatch.setattr(baselines, "make_scorer", fake_make_scorer)
-    evaluate = _script("evaluate")
+    evaluate = load_script("evaluate")
     args = ["--corpus", str(tmp_path / "corpus.parquet"), "--splits",
             str(tmp_path / "splits.parquet"), "--model", "transformer"]
     assert evaluate.main([
@@ -706,3 +706,14 @@ def test_evaluate_cli_transformer_options_and_kept_sources(tokenizer, corpus, tm
     seen.clear()
     assert evaluate.main([*args, "--out-dir", str(tmp_path / "r2")]) == 0
     assert not {"precision", "lr", "grad_accum", "gradient_checkpointing"} & set(seen)
+
+
+def test_unpack_rejects_tokenizer_paths_outside_its_temp_dir(tmp_path) -> None:
+    model = TransformerModel(use_features=False)
+    model._packed = {"model_type": "distilbert",
+                     "config": {"vocab_size": 10, "dim": 8, "hidden_dim": 16, "n_layers": 1,
+                                "n_heads": 2, "max_position_embeddings": 16},
+                     "state": {}, "tokenizer_files": {"../escape.txt": b"x"}}
+    with pytest.raises(ValueError, match="bad tokenizer file name"):
+        model.predict_proba(["text"])
+

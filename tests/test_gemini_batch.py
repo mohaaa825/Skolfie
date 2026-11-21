@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,21 +18,7 @@ from skolfie.data.generation.essay_plan import (
     essay_plan,
 )
 from skolfie.eval.splits import group_key
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _gen():
-    name = "skolfie_generate_ai_texts"
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, REPO_ROOT / "scripts" /
-                                                  "generate_ai_texts.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
+from tests.conftest import load_script
 
 # ---- plan --------------------------------------------------------------------------------
 
@@ -64,7 +48,7 @@ def test_plan_prompts_ask_for_the_length_and_fit_grades() -> None:
 
 def test_plan_ids_group_by_topic_like_the_corpus() -> None:
     plan = essay_plan(400)
-    gen = _gen()
+    gen = load_script("generate_ai_texts")
     for s in plan[:200]:
         rec = gen.make_record("gemini-3.5-flash-lite", s, "word " * 900)
         key = group_key(rec["id"], "fresh")
@@ -161,7 +145,7 @@ class FakeClient:
 
 
 def _runner(tmp_path, client, n=40, **kw):
-    gen = _gen()
+    gen = load_script("generate_ai_texts")
     plan = essay_plan(200)
     return gb.BatchRunner(client, plan, work_dir=tmp_path / "work",
                           out_path=tmp_path / "out" / "g.jsonl", clean=gen.clean_output,
@@ -229,10 +213,7 @@ def test_runner_stops_at_cost_cap(tmp_path) -> None:
 
 
 def test_script_dry_run(capsys) -> None:
-    spec = importlib.util.spec_from_file_location("gemini_batch_script",
-                                                  REPO_ROOT / "scripts" / "gemini_batch_essays.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = load_script("gemini_batch_essays")
     assert mod.main(["--out-dir", "x", "--work-dir", "y", "--dry-run", "--n", "100"]) == 0
     out = capsys.readouterr().out
     assert "Estimated cost of 100 essays" in out and "lab-report" in out

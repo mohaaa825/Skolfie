@@ -7,7 +7,6 @@ Near-duplicate clustering (skolfie/eval/near_dup.py), the split's use of it
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +25,7 @@ from skolfie.eval.splits import (
     merge_near_duplicate_groups,
     split_groups,
 )
+from tests.conftest import load_script
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RNG_WORDS = [f"w{i}" for i in range(3000)]
@@ -146,16 +146,8 @@ def test_config_threshold_validation_and_hash():
 
 # ------------------------------------------------------------------ leak script
 
-def _load_script():
-    spec = importlib.util.spec_from_file_location("check_leaks",
-                                                  REPO_ROOT / "scripts" / "check_leaks.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 def test_check_leaks_reports_cross_split_duplicates(tmp_path):
-    mod = _load_script()
+    mod = load_script("check_leaks")
     base, other = _text(7), _text(8)
     df = pd.DataFrame({"id": ["a", "b", "c", "d"],
                        "text": [base, _edit(base), base, other],

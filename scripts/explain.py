@@ -42,33 +42,10 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
 
-
-def _ensure_repo_on_path() -> None:
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-
-
-def _positive_int(value: str) -> int:
-    n = int(value)
-    if n <= 0:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return n
-
-
-def _non_negative_int(value: str) -> int:
-    n = int(value)
-    if n < 0:
-        raise argparse.ArgumentTypeError("must be 0 or more")
-    return n
-
-
-def _share(value: str) -> float:
-    x = float(value)
-    if not 0 <= x <= 1:
-        raise argparse.ArgumentTypeError("must be between 0 and 1")
-    return x
+from scripts._cli import non_negative_int, positive_int, share  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -79,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--splits", type=Path, required=True)
     parser.add_argument("--split", default="test", help="Split to sample from (default: test).")
-    parser.add_argument("--n", type=_positive_int, default=20,
+    parser.add_argument("--n", type=positive_int, default=20,
                         help="Texts to explain, half human and half AI (default: 20).")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--model", type=Path, required=True,
@@ -92,21 +69,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mixed-report", type=Path,
                         help="mixed_report.json from eval_mixed.py: use its tuned chunk rule "
                              "and chunk size.")
-    parser.add_argument("--chunk-lo", type=_share,
+    parser.add_argument("--chunk-lo", type=share,
                         help="Chunk rule: a chunk at or below this is clearly human.")
-    parser.add_argument("--chunk-hi", type=_share,
+    parser.add_argument("--chunk-hi", type=share,
                         help="Chunk rule: a chunk at or above this is clearly AI.")
-    parser.add_argument("--target-words", type=_positive_int,
+    parser.add_argument("--target-words", type=positive_int,
                         help="Chunk size in words (default: from --mixed-report, else 60).")
-    parser.add_argument("--min-words", type=_positive_int,
+    parser.add_argument("--min-words", type=positive_int,
                         help="Smallest chunk in words (default: from --mixed-report, else 25).")
-    parser.add_argument("--top-k", type=_positive_int, default=5,
+    parser.add_argument("--top-k", type=positive_int, default=5,
                         help="Features per text (default: 5).")
     parser.add_argument("--reference-split", default="val",
                         help="Split for the typical feature values (default: val).")
-    parser.add_argument("--reference-n", type=_non_negative_int, default=400,
+    parser.add_argument("--reference-n", type=non_negative_int, default=400,
                         help="Reference texts, half human and half AI (default: 400; 0 = none).")
-    parser.add_argument("--batch-size", type=_positive_int, default=64)
+    parser.add_argument("--batch-size", type=positive_int, default=64)
     parser.add_argument("--out-dir", type=Path, default=Path("reports") / "explain")
     return parser
 
@@ -131,7 +108,6 @@ def stratified_ids(df: Any, n: int, seed: int) -> list[str]:
 def reuse_or_load(verdict_model: Any, model_path: Path, path: Path) -> Any:
     """The model saved at `path`, reusing the verdict model or one of its members when it is
     the same file (`skolfie.explain.explainer.reuse_or_load`)."""
-    _ensure_repo_on_path()
     from skolfie.explain.explainer import reuse_or_load as _reuse_or_load
 
     return _reuse_or_load(verdict_model, model_path, path)
@@ -139,7 +115,6 @@ def reuse_or_load(verdict_model: Any, model_path: Path, path: Path) -> Any:
 
 def chunk_settings(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[str, Any]:
     """Chunk size and chunk rule params from --mixed-report and the --chunk-* flags."""
-    _ensure_repo_on_path()
     from skolfie.mixed.detector import (
         DEFAULT_MIN_WORDS,
         DEFAULT_TARGET_WORDS,
@@ -173,7 +148,6 @@ def chunk_settings(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    _ensure_repo_on_path()
     started = time.time()
 
     from functools import partial

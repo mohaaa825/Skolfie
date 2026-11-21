@@ -97,7 +97,6 @@ TECHNICAL_DOMAIN = "technical"
 EXTERNAL_COLUMNS = ("set", "group", "writer", "edited_by_ai")
 WRITERS = ("non-native", "native", "unknown", "ai")
 ELLIPSE_SET = "ellipse"
-STATUSES = ("far_above", "above_uncertain", "ok", "too_small")
 
 # Built-in descriptions of the external sets' sources, used when the fairness
 # sets have no manifest that names them.
@@ -228,7 +227,8 @@ class FlagRule:
 
 
 def status_of(row: dict[str, Any], reference_rate: float, rule: FlagRule) -> str:
-    """One of STATUSES for a row of `group_rates` (see the module docstring)."""
+    """far_above / above_uncertain / ok / too_small for a row of `group_rates` (see the
+    module docstring)."""
     if row["n"] < rule.min_n:
         return "too_small"
     rate = row["rate"]

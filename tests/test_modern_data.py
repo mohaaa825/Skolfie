@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import csv
 import dataclasses
-import importlib.util
 import json
-import sys
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -27,6 +25,7 @@ from skolfie.data.generation.student import PERSUADE_PROMPTS, student_prompt_pla
 from skolfie.data.sources import fresh, persuade
 from skolfie.eval import splits as splits_mod
 from skolfie.eval.report import oversample_rows, run_evaluation
+from tests.conftest import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).parent / "fixtures" / "sources"
@@ -40,17 +39,6 @@ PERSUADE_NAMES = [
     "Does the electoral college work?", "Cell phones at school", "Distance learning",
     "Seeking multiple opinions",
 ]
-
-
-def _script(name: str):
-    module_name = f"skolfie_test_{name}"
-    spec = importlib.util.spec_from_file_location(module_name,
-                                                  REPO_ROOT / "scripts" / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
 
 
 def _essay(i: int, prompt: str) -> str:
@@ -203,7 +191,7 @@ def test_build_corpus_passes_source_options(tmp_path: Path) -> None:
         corpus_mod.build_corpus(["persuade"], raw, tmp_path / "out2", download=False,
                                 registry=registry, source_options={"fresh": {}})
 
-    build = _script("build_corpus")
+    build = load_script("build_corpus")
     assert build.main(["--sources", "persuade", "--raw-dir", str(raw), "--out-dir",
                        str(tmp_path / "cli"), "--no-download", "--persuade-max-essays", "3",
                        "-q"]) == 0
@@ -247,7 +235,7 @@ def _plan_file(tmp_path: Path) -> tuple[Path, list]:
 
 
 def test_import_claude_essays(tmp_path: Path, capsys) -> None:
-    imp = _script("import_claude_essays")
+    imp = load_script("import_claude_essays")
     plan, entries = _plan_file(tmp_path)
     essays = tmp_path / "essays"
     body = " ".join(["This is a sentence a student might write about the topic."] * 6)
@@ -310,7 +298,7 @@ def test_import_claude_essays(tmp_path: Path, capsys) -> None:
 
 
 def test_import_claude_essays_rejects_bad_plans(tmp_path: Path) -> None:
-    imp = _script("import_claude_essays")
+    imp = load_script("import_claude_essays")
     plan, entries = _plan_file(tmp_path)
     (tmp_path / "essays").mkdir()
     bad = tmp_path / "bad.json"
@@ -470,7 +458,7 @@ def test_run_evaluation_oversamples_train_only() -> None:
 
 
 def test_evaluate_cli_oversample(tmp_path: Path, capsys) -> None:
-    evaluate = _script("evaluate")
+    evaluate = load_script("evaluate")
     assert evaluate.parse_oversample(["fresh=6", "persuade=1, x=2"]) == {
         "fresh": 6, "persuade": 1, "x": 2}
     for bad in (["fresh"], ["fresh=0"], ["=3"], ["fresh=two"], ["fresh=2,fresh=3"]):
@@ -570,8 +558,8 @@ def test_run_evaluation_keeps_sources_in_train_and_eval() -> None:
 
 
 def test_evaluate_cli_keep_sources(tmp_path: Path, capsys) -> None:
-    evaluate = _script("evaluate")
-    assert evaluate.parse_keep_sources(["fresh, persuade", "fresh", "x,"]) == [
+    evaluate = load_script("evaluate")
+    assert evaluate.comma_list(["fresh, persuade", "fresh", "x,"]) == [
         "fresh", "persuade", "x"]
     df = _keep_frame(n_old=60)
     corpus = df.assign(id=df.index, generator="g", domain="academic", subdomain="s",

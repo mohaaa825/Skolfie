@@ -36,7 +36,10 @@ def _page() -> _Collector:
 
 
 def test_files_exist():
-    for name in ("index.html", "styles.css", "main.js", "config.js", "assets/logo.svg", "assets/icon.svg"):
+    names = (
+        "index.html", "styles.css", "main.js", "config.js", "assets/logo.svg", "assets/icon.svg",
+    )
+    for name in names:
         assert (SITE / name).is_file(), name
 
 

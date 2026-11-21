@@ -36,16 +36,6 @@ import numpy as np
 from skolfie.eval.metrics import to_binary
 
 DELTA_FEATURES = ("delta_cos_human", "delta_cos_ai", "delta_cos_diff", "delta_bur_diff")
-FEATURE_DESCRIPTIONS = {
-    "delta_cos_human": "How far the text's common-word profile is from typical human text "
-                       "(Cosine Delta).",
-    "delta_cos_ai": "How far the text's common-word profile is from typical AI text "
-                    "(Cosine Delta).",
-    "delta_cos_diff": "Cosine Delta to human text minus to AI text; positive means the text "
-                      "uses common words more like AI text.",
-    "delta_bur_diff": "Burrows' Delta to human text minus to AI text; positive means the text "
-                      "uses common words more like AI text.",
-}
 
 # Words: letters, optionally with one inner apostrophe ("don't"); no digits.
 WORD_PATTERN = r"(?u)\b[^\W\d_]+(?:'[^\W\d_]+)?\b"

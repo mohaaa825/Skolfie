@@ -17,6 +17,7 @@ import pytest
 
 from skolfie.data.schema import COLUMNS, DOMAINS, Record
 from skolfie.data.sources import SOURCES, autextification, fresh, get_source, hc3, m4gt
+from skolfie.data.sources._common import iter_jsonl
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sources"
 
@@ -325,3 +326,36 @@ def test_fresh_skips_truncated_lines_and_keeps_colon_ids(tmp_path, caplog):
     assert records[0].generator == "llama3.3:70b"
     assert records[0].id.rsplit(":", 2)[1:] == ["essay-03", "1"]
     assert "llama3.3_70b.jsonl:2: skipping" in caplog.text
+
+
+def test_m4gt_null_ids_fall_back_to_the_row_index(tmp_path):
+    d = tmp_path / "m4gt"
+    d.mkdir()
+    rows = [{"text": f"text {i}", "model": "human", "source": "wikihow", "id": v}
+            for i, v in enumerate([None, "", None, "real-7"])]
+    (d / "SubtaskA.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    ids = [r.id for r in m4gt.load(tmp_path, download=False)]
+    assert ids == ["m4gt:SubtaskA:0", "m4gt:SubtaskA:1", "m4gt:SubtaskA:2",
+                   "m4gt:SubtaskA:real-7"]
+
+
+def test_jsonl_with_byte_order_mark(tmp_path):
+    path = tmp_path / "x.jsonl"
+    path.write_bytes('\ufeff{"a": 1}\n{"a": 2}\n'.encode())
+    assert [row for _, row in iter_jsonl(path)] == [{"a": 1}, {"a": 2}]
+
+    d = tmp_path / "fresh"
+    d.mkdir()
+    row = {"id": "g:p:0", "text": "some text", "label": "ai", "generator": "g",
+           "domain": "casual", "subdomain": "post"}
+    (d / "g.jsonl").write_bytes(("\ufeff" + json.dumps(row) + "\n").encode())
+    assert [r.id for r in fresh.load(tmp_path)] == ["fresh:g:p:0"]
+
+
+def test_autextification_tsv_with_byte_order_mark_keeps_source_ids(tmp_path):
+    d = tmp_path / "autextification" / "subtask_1" / "en"
+    d.mkdir(parents=True)
+    (d / "train.tsv").write_bytes(
+        "\ufeffid\ttext\tlabel\tdomain\n7\thello there world\thuman\tnews\n".encode())
+    assert [r.id for r in autextification.load(tmp_path, download=False)] == [
+        "autextification:train:7"]

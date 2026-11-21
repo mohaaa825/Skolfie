@@ -36,26 +36,11 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
 
-
-def _ensure_repo_on_path() -> None:
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-
-
-def _positive_int(value: str) -> int:
-    n = int(value)
-    if n <= 0:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return n
-
-
-def _share(value: str) -> float:
-    x = float(value)
-    if not 0 <= x <= 1:
-        raise argparse.ArgumentTypeError("must be between 0 and 1")
-    return x
+from scripts._cli import positive_int, share  # noqa: E402
+from skolfie.eval.report import _fmt, _pct, _table  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,41 +55,23 @@ def build_parser() -> argparse.ArgumentParser:
                              "evaluate.py --save-model or stack.py --save-model.")
     parser.add_argument("--fit-split", default="val")
     parser.add_argument("--eval-split", default="test")
-    parser.add_argument("--n-mixed", type=_positive_int, default=2000,
+    parser.add_argument("--n-mixed", type=positive_int, default=2000,
                         help="Spliced texts per set (default: 2000).")
-    parser.add_argument("--n-pure", type=_positive_int, default=1000,
+    parser.add_argument("--n-pure", type=positive_int, default=1000,
                         help="Pure human and pure AI texts per set, each (default: 1000).")
-    parser.add_argument("--target-words", type=_positive_int, default=60,
+    parser.add_argument("--target-words", type=positive_int, default=60,
                         help="Chunk size in words (default: 60).")
-    parser.add_argument("--min-words", type=_positive_int, default=25,
+    parser.add_argument("--min-words", type=positive_int, default=25,
                         help="Smallest chunk in words (default: 25).")
-    parser.add_argument("--max-false-mixed", type=_share, default=0.05,
+    parser.add_argument("--max-false-mixed", type=share, default=0.05,
                         help="Tune the rules only among settings that call at most this share "
                              "of pure human texts, and of pure AI texts, Mixed on the fit set "
                              "(default: 0.05; 1 turns the cap off).")
-    parser.add_argument("--batch-size", type=_positive_int, default=4096,
+    parser.add_argument("--batch-size", type=positive_int, default=4096,
                         help="Texts per predict_proba call (default: 4096).")
     parser.add_argument("--out-dir", type=Path)
     parser.add_argument("--seed", type=int, default=0)
     return parser
-
-
-def _fmt(x: Any, digits: int = 3) -> str:
-    if x is None or (isinstance(x, float) and x != x):
-        return "n/a"
-    return f"{x:.{digits}f}" if isinstance(x, float) else str(x)
-
-
-def _pct(x: Any) -> str:
-    if x is None or (isinstance(x, float) and x != x):
-        return "n/a"
-    return f"{100 * x:.1f}%"
-
-
-def _table(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> list[str]:
-    lines = ["| " + " | ".join(header) + " |", "|---" + "|---:" * (len(header) - 1) + "|"]
-    lines += ["| " + " | ".join(str(c) for c in row) + " |" for row in rows]
-    return lines
 
 
 def render_md(report: dict[str, Any]) -> str:
@@ -173,7 +140,6 @@ def render_md(report: dict[str, Any]) -> str:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    _ensure_repo_on_path()
     started = time.time()
 
     from functools import partial

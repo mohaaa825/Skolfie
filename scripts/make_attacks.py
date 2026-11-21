@@ -58,24 +58,16 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts._cli import positive_int  # noqa: E402
+
 DEFAULT_N = 1000
 OUT_COLUMNS = ["id", "orig_id", "attack", "text", "label", "source", "domain", "generator",
                "n_words", "word_change", "meta"]
 API_KEYS = (("anthropic", "ANTHROPIC_API_KEY"), ("openai", "OPENAI_API_KEY"),
             ("gemini", "GEMINI_API_KEY"))
-
-
-def _ensure_repo_on_path() -> None:
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-
-
-def _positive_int(value: str) -> int:
-    n = int(value)
-    if n <= 0:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return n
 
 
 def _fraction(value: str) -> float:
@@ -108,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--attacks", default="default",
                         help="Comma-separated attack names, or 'default' (every attack in the "
                              "suite whose requirements are met). See --list.")
-    parser.add_argument("--n", type=_positive_int,
+    parser.add_argument("--n", type=positive_int,
                         help=f"AI texts and human texts to sample, each (default: {DEFAULT_N}; "
                              "with --share: a cap on the AI texts, default none).")
     parser.add_argument("--share", type=_fraction,
@@ -118,9 +110,9 @@ def build_parser() -> argparse.ArgumentParser:
                         metavar="ATTACK=WEIGHT",
                         help="With --share: relative weight of an attack when assigning one to "
                              "each sampled text (default 1 each; repeatable).")
-    parser.add_argument("--min-words", type=_positive_int, default=40,
+    parser.add_argument("--min-words", type=positive_int, default=40,
                         help="Only sample texts with at least N words (default: 40).")
-    parser.add_argument("--max-words", type=_positive_int, default=400,
+    parser.add_argument("--max-words", type=positive_int, default=400,
                         help="Cut texts (and attack outputs) at a sentence boundary to at most "
                              "N words (default: 400).")
     parser.add_argument("--seed", type=int, default=0)
@@ -135,12 +127,12 @@ def build_parser() -> argparse.ArgumentParser:
                             "that is set.")
     group.add_argument("--model", help="Model id (default: the provider's default).")
     group.add_argument("--base-url", help="API base URL override.")
-    group.add_argument("--workers", type=_positive_int, default=8,
+    group.add_argument("--workers", type=positive_int, default=8,
                        help="Concurrent API requests (default: 8).")
     group = parser.add_argument_group("T5 paraphrase and synonyms")
     group.add_argument("--t5-model", help="Seq2seq paraphrase checkpoint (default: "
                                           "humarin/chatgpt_paraphraser_on_T5_base).")
-    group.add_argument("--t5-batch-size", type=_positive_int, default=32)
+    group.add_argument("--t5-batch-size", type=positive_int, default=32)
     group.add_argument("--device", help="cuda / cpu for T5 (default: cuda if available).")
     group.add_argument("--synonym-source", choices=("auto", "wordnet", "table"), default="auto",
                        help="auto (default): WordNet, downloaded if missing, else the small "
@@ -296,7 +288,6 @@ def _replace_atomically(path: Path, write: Any) -> None:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    _ensure_repo_on_path()
 
     from skolfie.robust.attacks import ATTACKS, get_attack
 

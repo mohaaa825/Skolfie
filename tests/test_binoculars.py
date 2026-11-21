@@ -17,7 +17,6 @@ import numpy as np
 import pytest
 
 from skolfie.features.binoculars import (
-    BINO_DESCRIPTIONS,
     BINO_FEATURES,
     BinocularsFeaturizer,
     _aggregate,
@@ -122,11 +121,9 @@ def by_hand(torch, pair, text: str) -> dict[str, float]:
 # --------------------------------------------------------------------------- #
 # Names, keys, imports
 # --------------------------------------------------------------------------- #
-def test_feature_names_prefixed_unique_and_described() -> None:
+def test_feature_names_prefixed_and_unique() -> None:
     assert len(BINO_FEATURES) == len(set(BINO_FEATURES)) == 5
     assert all(name.startswith("bino_") for name in BINO_FEATURES)
-    assert set(BINO_DESCRIPTIONS) == set(BINO_FEATURES)
-    assert all(isinstance(d, str) and d.strip() for d in BINO_DESCRIPTIONS.values())
 
 
 def test_cache_key_encodes_models_truncation_and_quantization() -> None:

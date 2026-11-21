@@ -34,7 +34,7 @@ from skolfie.data.schema import DOMAINS
 TARGET_DOMAINS = ("academic", "creative", "technical", "casual")
 
 # Per balanced block of 10 sampled prompts: 2 of each target domain, 1 review, 1 news.
-DOMAIN_BLOCK = ("academic", "creative", "technical", "casual") * 2 + ("review", "news")
+DOMAIN_BLOCK = TARGET_DOMAINS * 2 + ("review", "news")
 
 DEFAULT_LENGTHS = (100, 200, 300, 450, 600)
 TEMPERATURES = (0.6, 0.8, 1.0)

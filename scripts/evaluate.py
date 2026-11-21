@@ -64,6 +64,11 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts._cli import comma_list, positive_float, positive_int  # noqa: E402
+
 MODEL_CHOICES = (
     "length | tfidf | features | features-nolm | features-rf | features-nolm-rf | ensemble | "
     "transformer | transformer-text | transformer-chunks | ensemble:PATH | joblib:PATH"
@@ -75,33 +80,12 @@ ENSEMBLE_DEFAULT_MAX_TRAIN = 5000
 ENSEMBLE_DEFAULT_MAX_EVAL = 2000
 
 
-def _ensure_repo_on_path() -> None:
-    """Allow `python scripts/evaluate.py` from a checkout without installing."""
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-
-
 def _model_spec(value: str) -> str:
     if value in ("length", "tfidf", "ensemble", *NAMED_MODELS):
         return value
     if re.match(r"^(joblib|ensemble):.+", value):
         return value
     raise argparse.ArgumentTypeError(f"invalid model {value!r}; use {MODEL_CHOICES}")
-
-
-def _positive_int(value: str) -> int:
-    n = int(value)
-    if n <= 0:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return n
-
-
-def _positive_float(value: str) -> float:
-    x = float(value)
-    if not x > 0:
-        raise argparse.ArgumentTypeError("must be a positive number")
-    return x
 
 
 def parse_oversample(values: Sequence[str]) -> dict[str, int]:
@@ -128,14 +112,6 @@ def parse_oversample(values: Sequence[str]) -> dict[str, int]:
     return out
 
 
-def parse_keep_sources(values: Sequence[str]) -> list[str]:
-    """`["fresh,persuade", "x"]` -> ["fresh", "persuade", "x"] (order kept, no repeats)."""
-    out: list[str] = []
-    for value in values:
-        out += [s for s in (item.strip() for item in value.split(",")) if s and s not in out]
-    return out
-
-
 def default_out_dir(spec: str) -> Path:
     if ":" in spec:
         kind, path = spec.split(":", 1)
@@ -157,10 +133,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"Scorer to evaluate: {MODEL_CHOICES}.")
     parser.add_argument("--out-dir", type=Path,
                         help="Where to write report.json/report.md (default: reports/<model>).")
-    parser.add_argument("--max-train", type=_positive_int,
+    parser.add_argument("--max-train", type=positive_int,
                         help="Sample the train split down to N texts (stratified, seeded). "
                              f"Default: all; {ENSEMBLE_DEFAULT_MAX_TRAIN} for ensemble.")
-    parser.add_argument("--max-eval", type=_positive_int,
+    parser.add_argument("--max-eval", type=positive_int,
                         help="Sample each evaluation split down to N texts (stratified by "
                              f"label, seeded). Default: all; {ENSEMBLE_DEFAULT_MAX_EVAL} for "
                              "ensemble.")
@@ -200,9 +176,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Cache per-text style/GPT-2 features here (parquet keyed by text "
                             "hash), so re-runs skip the slow part.")
     group.add_argument("--lm-model", help="Causal LM for the lm_* features (default: gpt2).")
-    group.add_argument("--lm-max-tokens", type=_positive_int,
+    group.add_argument("--lm-max-tokens", type=positive_int,
                        help="Truncate texts to N tokens for the LM (default: 512).")
-    group.add_argument("--lm-batch-size", type=_positive_int, help="LM batch size (default: 32).")
+    group.add_argument("--lm-batch-size", type=positive_int, help="LM batch size (default: 32).")
     group.add_argument("--lm-device", help="cuda / cpu (default: cuda if available).")
     group.add_argument("--bino-observer", metavar="HF_ID",
                        help="Feature models only: add Binoculars features (bino_*) from this "
@@ -213,9 +189,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Performer LM with the observer's tokenizer, e.g. "
                             "Qwen/Qwen2.5-1.5B-Instruct (default: none = observer-only "
                             "features, no cross-perplexity / Binoculars score).")
-    group.add_argument("--bino-max-tokens", type=_positive_int,
+    group.add_argument("--bino-max-tokens", type=positive_int,
                        help="Truncate texts to N tokens for Binoculars (default: 256).")
-    group.add_argument("--bino-batch-size", type=_positive_int,
+    group.add_argument("--bino-batch-size", type=positive_int,
                        help="Binoculars batch size (default: 8).")
     group.add_argument("--bino-quantization", choices=("4bit", "8bit"),
                        help="Load the Binoculars models in 4-bit (nf4) or 8-bit with "
@@ -228,14 +204,14 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Transformer backbone, a Hugging Face model id (default: "
                             "distilbert-base-cased; e.g. microsoft/deberta-v3-large on an "
                             "A100 / L4 with --precision bf16 --lr 1e-5).")
-    group.add_argument("--max-length", type=_positive_int,
+    group.add_argument("--max-length", type=positive_int,
                        help="Transformer input length in tokens (default: 512).")
-    group.add_argument("--epochs", type=_positive_int, help="Transformer epochs (default: 1).")
-    group.add_argument("--batch-size", type=_positive_int,
+    group.add_argument("--epochs", type=positive_int, help="Transformer epochs (default: 1).")
+    group.add_argument("--batch-size", type=positive_int,
                        help="Transformer batch size (default: 16, x2 gradient accumulation).")
-    group.add_argument("--grad-accum", type=_positive_int,
+    group.add_argument("--grad-accum", type=positive_int,
                        help="Transformer gradient accumulation steps (default: 2).")
-    group.add_argument("--lr", type=_positive_float,
+    group.add_argument("--lr", type=positive_float,
                        help="Transformer backbone learning rate (default: 3e-5).")
     group.add_argument("--precision", choices=("auto", "fp16", "bf16", "fp32"),
                        help="Transformer precision on CUDA (default: auto = bf16 where the GPU "
@@ -278,7 +254,6 @@ def load_extra_train(paths: Sequence[Path], parser: argparse.ArgumentParser) -> 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    _ensure_repo_on_path()
 
     from skolfie.eval.report import compare_reports
 
@@ -323,15 +298,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         oversample = parse_oversample(args.oversample)
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
-    keep_sources = parse_keep_sources(args.keep_sources)
+    keep_sources = comma_list(args.keep_sources)
     length_match = None
     if args.length_match:
         if not 0 <= args.length_match_prob <= 1:
             parser.error("--length-match-prob must be in [0, 1]")
-        length_match = {"sources": parse_keep_sources([args.length_match]),
+        length_match = {"sources": comma_list([args.length_match]),
                         "prob": args.length_match_prob}
         if args.length_match_ref:
-            length_match["reference_sources"] = parse_keep_sources([args.length_match_ref])
+            length_match["reference_sources"] = comma_list([args.length_match_ref])
     if args.bino_observer and args.model not in FEATURE_MODELS:
         parser.error("--bino-observer is for the feature models only "
                      f"({', '.join(FEATURE_MODELS)}); the transformer keeps its own features")

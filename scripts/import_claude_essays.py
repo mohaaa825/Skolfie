@@ -48,6 +48,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.generate_ai_texts import (  # noqa: E402
+    clean_output,
+    make_record,
+    output_path,
+    record_id,
+)
 from skolfie.data.generation.prompts import PromptSpec  # noqa: E402
 
 DEFAULT_OUT_DIR = Path("data") / "raw" / "fresh"
@@ -55,26 +61,6 @@ _SPEC_FIELDS = {f.name for f in dataclasses.fields(PromptSpec)}
 _REQUIRED = {"prompt_id", "template_id", "domain", "subdomain", "style", "text",
              "target_words", "temperature", "max_tokens"}
 COUNT_COLUMNS = ("planned", "written", "missing", "empty", "too_short", "refusal")
-
-
-def _generate_module():
-    """scripts/generate_ai_texts.py (clean_output, make_record, record_id, output_path)."""
-    import importlib.util
-
-    name = "skolfie_generate_ai_texts"
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(
-        name, REPO_ROOT / "scripts" / "generate_ai_texts.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[name] = module  # dataclasses look their module up while it executes
-    try:
-        spec.loader.exec_module(module)
-    except BaseException:
-        del sys.modules[name]
-        raise
-    return module
 
 
 def load_plan(path: Path) -> list[tuple[str, str, PromptSpec]]:
@@ -129,7 +115,6 @@ def _read_existing(path: Path) -> list[tuple[Optional[str], str]]:
 def import_essays(plan: list[tuple[str, str, PromptSpec]], essays_dir: Path, out_dir: Path,
                   min_words: int = 0) -> dict[str, Counter]:
     """Write `<out_dir>/<generator>.jsonl` per generator; counts per generator."""
-    gen = _generate_module()
     by_generator: dict[str, list[tuple[str, PromptSpec]]] = {}
     for model, generator, spec in plan:
         by_generator.setdefault(generator, []).append((model, spec))
@@ -144,19 +129,19 @@ def import_essays(plan: list[tuple[str, str, PromptSpec]], essays_dir: Path, out
                 c["missing"] += 1
                 continue
             raw = path.read_text(encoding="utf-8-sig", errors="replace")
-            text, reason = gen.clean_output(raw)
+            text, reason = clean_output(raw)
             if text is not None and len(text.split()) < min_words:
                 text, reason = None, "too_short"
             if text is None:
                 c[reason] += 1
                 continue
-            record = gen.make_record(generator, spec, text)
+            record = make_record(generator, spec, text)
             new_records[record["id"]] = json.dumps(record, ensure_ascii=False)
             c["written"] += 1
         counts[generator] = c
 
-        out_path = gen.output_path(out_dir, generator)
-        planned_ids = {gen.record_id(generator, spec) for _, spec in items}
+        out_path = output_path(out_dir, generator)
+        planned_ids = {record_id(generator, spec) for _, spec in items}
         lines = []
         for rid, line in _read_existing(out_path):
             if rid is not None and rid in new_records:
@@ -164,8 +149,8 @@ def import_essays(plan: list[tuple[str, str, PromptSpec]], essays_dir: Path, out
             if rid is not None and rid in planned_ids:
                 c["kept_old"] += 1
             lines.append(line)
-        lines += [new_records[gen.record_id(generator, spec)] for _, spec in items
-                  if gen.record_id(generator, spec) in new_records]
+        lines += [new_records[record_id(generator, spec)] for _, spec in items
+                  if record_id(generator, spec) in new_records]
         if not lines:
             continue
         out_path.parent.mkdir(parents=True, exist_ok=True)

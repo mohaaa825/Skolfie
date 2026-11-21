@@ -23,7 +23,6 @@ cost estimate without calling the API.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import sys
 from collections import Counter
@@ -34,6 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.generate_ai_texts import clean_output, make_record  # noqa: E402
 from skolfie.data.generation import gemini_batch as gb  # noqa: E402
 from skolfie.data.generation.essay_plan import (  # noqa: E402
     SYSTEM_INSTRUCTION,
@@ -42,23 +42,6 @@ from skolfie.data.generation.essay_plan import (  # noqa: E402
 )
 
 OUT_FILE = "gemini-3.5-flash-lite-batch.jsonl"  # not the repo's gemini-3.5-flash-lite.jsonl
-
-
-def _generate_module():
-    name = "skolfie_generate_ai_texts"
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(
-        name, REPO_ROOT / "scripts" / "generate_ai_texts.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        del sys.modules[name]
-        raise
-    return module
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,10 +95,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     from google import genai  # pip install google-genai
 
-    gen = _generate_module()
     runner = gb.BatchRunner(
         genai.Client(api_key=key), plan, work_dir=args.work_dir,
-        out_path=args.out_dir / OUT_FILE, clean=gen.clean_output, make_record=gen.make_record,
+        out_path=args.out_dir / OUT_FILE, clean=clean_output, make_record=make_record,
         n_target=args.n, model=args.model, max_usd=args.max_usd, max_rounds=args.max_rounds,
         thinking_level=args.thinking_level or None, use_cache=not args.no_cache,
         poll_seconds=args.poll_seconds, max_wait_hours=args.max_wait_hours,

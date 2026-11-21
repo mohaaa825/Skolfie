@@ -165,19 +165,17 @@ def escape_formula(value: Any) -> Any:
     return value
 
 
-def export_feedback(csv_path: str, export_path: str, escape_formulas: bool = True) -> str:
+def export_feedback(csv_path: str, export_path: str) -> str:
     """
     Copy the current feedback dataset to a new path (for download/export).
 
-    With `escape_formulas` (the default) string cells starting with
-    = + - @ (or a tab / carriage return) get a leading apostrophe so that
-    opening the export in Excel or Google Sheets cannot run user-supplied
-    formulas. Pass False for a byte-faithful copy for retraining.
+    String cells starting with = + - @ (or a tab / carriage return) get a
+    leading apostrophe so that opening the export in Excel or Google Sheets
+    cannot run user-supplied formulas. Retraining reads the master CSV.
     """
     df = load_feedback(csv_path)
-    if escape_formulas:
-        for col in _STRING_COLUMNS:
-            if col in df.columns:
-                df[col] = df[col].map(escape_formula)
+    for col in _STRING_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].map(escape_formula)
     df.to_csv(export_path, index=False)
     return export_path

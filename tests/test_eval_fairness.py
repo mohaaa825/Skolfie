@@ -35,8 +35,8 @@ from skolfie.eval.fairness import (
     wilson_interval,
 )
 from skolfie.models.baselines import LengthBaseline, TfidfLRBaseline
+from tests.conftest import load_script
 from tests.test_evaluate import _AI_WORDS, _HUMAN_WORDS, _text, make_corpus, make_splits
-from tests.test_stacker import _load_script
 
 
 # --------------------------------------------------------------------------- #
@@ -308,7 +308,7 @@ def _argv(data: dict[str, Path], *extra: str) -> list[str]:
 def test_script_end_to_end_with_stacked_model(data, capsys) -> None:
     root = data["root"]
     out = root / "stacked-out"
-    script = _load_script("eval_fairness")
+    script = load_script("eval_fairness")
     assert script.main(_argv(data, "--fairness-sets", str(data["sets"]),
                              "--model", f"stacked={root / 'stacked.joblib'}",
                              "--features-model", str(root / "features.joblib"),
@@ -366,7 +366,7 @@ def test_script_end_to_end_with_stacked_model(data, capsys) -> None:
 def test_script_threshold_from_val_and_missing_sets(data) -> None:
     root = data["root"]
     out = root / "compare-out"
-    script = _load_script("eval_fairness")
+    script = load_script("eval_fairness")
     assert script.main(_argv(data, "--fairness-sets", str(root / "missing.parquet"),
                              "--model", f"tfidf={root / 'tfidf.joblib'}",
                              "--model", f"length={root / 'length.joblib'}",
@@ -405,7 +405,7 @@ def test_script_threshold_from_val_and_missing_sets(data) -> None:
 
 
 def test_data_sources_fallbacks(tmp_path) -> None:
-    script = _load_script("eval_fairness")
+    script = load_script("eval_fairness")
     sources, origin = script.data_sources({})
     assert origin.startswith("skolfie.") and sources
     assert all(isinstance(s, dict) and s.get("name") for s in sources)
@@ -422,7 +422,7 @@ def test_data_sources_fallbacks(tmp_path) -> None:
 
 def test_script_usage_errors(data) -> None:
     root = data["root"]
-    script = _load_script("eval_fairness")
+    script = load_script("eval_fairness")
     model = ["--model", str(root / "tfidf.joblib")]
     with pytest.raises(SystemExit):  # no --model
         script.main(_argv(data))

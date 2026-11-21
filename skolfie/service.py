@@ -90,7 +90,6 @@ HEADLINES = {
     "uncertain": "Uncertain: no clear signal either way",
     "too_short": f"Too short to judge (needs at least {MIN_TEXT_WORDS} words)",
 }
-WARNING_KINDS = ("short_text", "obfuscation", "fairness", "language")
 
 BUNDLE_FILE = "bundle.json"
 BUNDLE_FORMAT = "skolfie-bundle"
@@ -118,7 +117,7 @@ ENGLISH_FUNCTION_WORDS = frozenset("""
 the of and to a in is that it for was on are as with be by this have from or at not but
 they which we you he she an their can has more there were been would will all what so if
 about also when one these how our its than other some them my do because into only most
-many should may very such those who his her no could any each then just than had does did
+many should may very such those who his her no could any each then just had does did
 being where while why your us me him own same both few through over under between after
 before again further once here up down out off above below during until against
 """.split())
@@ -319,19 +318,14 @@ def _resolve_bundle(bundle_dir: str | os.PathLike[str]) -> _Files:
                   **paths)
 
 
-def _member_paths(verdict_model: Any) -> Optional[dict[str, str]]:
-    members = getattr(verdict_model, "members", None)
-    if isinstance(members, dict) and callable(getattr(verdict_model, "_member", None)):
-        return members
-    return None
-
-
 def _remap_members(verdict_model: Any, files: _Files) -> dict[str, str]:
     """Point the StackedModel's members at files that exist; FileNotFoundError if one is gone.
 
     Returns {name: path} as now set on the model.
     """
-    members = _member_paths(verdict_model)
+    from skolfie.explain.explainer import stacked_members
+
+    members = stacked_members(verdict_model)
     if members is None:
         return {}
     for name, recorded in list(members.items()):
@@ -599,6 +593,7 @@ def make_bundle(models_dir: str | os.PathLike[str], reports_dir: str | os.PathLi
     by file name, so the folder can be moved anywhere and loaded with
     `Detector.from_bundle`. Missing optional files are listed under "missing".
     """
+    from skolfie.eval.report import atomic_path
     from skolfie.explain.explainer import load_model, same_file
 
     files = _resolve_dirs(models_dir, reports_dir, names)
@@ -643,7 +638,6 @@ def make_bundle(models_dir: str | os.PathLike[str], reports_dir: str | os.PathLi
         "notes": files.notes,
     }
     path = out / BUNDLE_FILE
-    tmp = out / (BUNDLE_FILE + ".tmp")
-    tmp.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    with atomic_path(path) as tmp:
+        tmp.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return path

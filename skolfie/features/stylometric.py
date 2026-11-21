@@ -12,10 +12,10 @@ Feature groups:
     6. Part-of-speech distribution  (noun/verb/adj/adv ratios)
     7. Function-word frequencies    (also reused by Burrows' Delta)
 
-The extractor is deliberately "flat": `extract_features` returns a plain
-dict of {feature_name: float}. That makes it trivial to turn into a numpy
-vector for the ML models, and easy to show to users as "top contributing
-features" without any extra translation layer.
+`extract_features` returns a plain dict of {feature_name: float};
+`features_to_vector` turns it into a fixed-order numpy vector. Only the
+legacy ensemble (`skolfie.models.ensemble`) uses this extractor; the feature
+model uses `skolfie.features.style`.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import numpy as np
 # We prefer NLTK for tokenization/POS tagging because it's far more accurate
 # than naive regex splitting. If the required NLTK data isn't available
 # (e.g. no internet on first run), we quietly fall back to regex-based
-# approximations so the app never crashes because of it.
+# approximations so feature extraction never fails because of it.
 # --------------------------------------------------------------------------
 _NLTK_PACKAGES = [
     ("tokenizers/punkt", "punkt"),
@@ -68,7 +68,7 @@ except Exception:
 
 # Common English function words, used both as extra stylistic signal here
 # and as the vocabulary for Burrows' Delta (see burrows_delta.py). Kept as
-# a local constant (rather than nltk.corpus.stopwords) so the app still
+# a local constant (rather than nltk.corpus.stopwords) so the extractor still
 # works even if NLTK corpora aren't installed.
 FUNCTION_WORDS = [
     "the", "of", "and", "a", "to", "in", "is", "you", "that", "it",

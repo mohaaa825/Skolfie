@@ -17,12 +17,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from skolfie.data.generation import providers
 from skolfie.data.generation.providers import FakeProvider, ProviderError
 from skolfie.mixed.chunking import split_sentences
 from skolfie.models.baselines import LengthBaseline, TfidfLRBaseline
 from skolfie.robust import attacks as A
+from skolfie.robust.normalize import normalize_for_scoring
+from tests.conftest import load_script
 from tests.test_evaluate import make_corpus, make_splits
-from tests.test_stacker import _load_script
 
 TEXT = (
     "The committee will consider the important proposal tomorrow morning. However, numerous "
@@ -177,7 +179,7 @@ def test_unicode_attacks_change_bytes_but_look_the_same() -> None:
     for fn in (A.homoglyph_text, A.zero_width_text):
         new = fn(TEXT, 0.3, A.text_rng(0, fn.__name__, TEXT))
         assert new != TEXT and new.encode() != TEXT.encode()
-        assert A.undo_unicode_tricks(new) == TEXT
+        assert normalize_for_scoring(new) == TEXT
         assert fn(TEXT, 0.0, A.text_rng(0, "x", TEXT)) == TEXT
     glyph = A.homoglyph_text(TEXT, 1.0, A.text_rng(0, "h", TEXT))
     assert len(glyph) == len(TEXT) and not glyph.isascii()
@@ -336,6 +338,35 @@ def test_clean_llm_output() -> None:
     assert A.clean_llm_output("As an AI, I cannot rewrite this text. " + body) is None
 
 
+def test_attack_names_match_whole_string() -> None:
+    for bad in ("typo_5\n", "typo_5/..", " typo_5"):
+        with pytest.raises(ValueError):
+            A.get_attack(bad)
+
+
+def test_clean_llm_output_keeps_inner_quotes() -> None:
+    body = " ".join(["word"] * 25)
+    dialogue = f'"Hello," she said. {body} "Goodbye."'
+    assert A.clean_llm_output(dialogue) == dialogue
+    assert A.clean_llm_output(f'"{body}"') == body
+    assert A.clean_llm_output(f'"""\n{body}\n"""') == body
+
+
+def test_run_prompts_redacts_api_key_in_logs() -> None:
+    class Leaky:
+        model_name = "m"
+        api_key = "sk-very-secret-key"
+
+        def generate(self, prompt, *, temperature, max_tokens):
+            raise ProviderError("bad request for key sk-very-secret-key", status=400)
+
+    logs: list[str] = []
+    assert A.run_prompts(Leaky(), ["a"], temperature=0.5, max_tokens=[10],
+                         log=logs.append) == [None]
+    assert logs and all("sk-very-secret-key" not in m for m in logs)
+
+
+
 # --------------------------------------------------------------------------- #
 # Scripts
 # --------------------------------------------------------------------------- #
@@ -360,13 +391,13 @@ def _make_argv(data: dict[str, Path], out: Path, *extra: str) -> list[str]:
 
 
 def test_make_attacks_list(capsys) -> None:
-    assert _load_script("make_attacks").main(["--list"]) == 0
+    assert load_script("make_attacks").main(["--list"]) == 0
     out = capsys.readouterr().out
     assert "t5_paraphrase" in out and "human_edit_30" in out
 
 
 def test_api_attacks_skip_without_keys(monkeypatch) -> None:
-    script = _load_script("make_attacks")
+    script = load_script("make_attacks")
     for _, key in script.API_KEYS:
         monkeypatch.delenv(key, raising=False)
     args = script.build_parser().parse_args(["--provider", "auto"])
@@ -387,7 +418,7 @@ def test_api_attacks_skip_without_keys(monkeypatch) -> None:
 
 
 def test_make_attacks_eval_sets(data, capsys) -> None:
-    script = _load_script("make_attacks")
+    script = load_script("make_attacks")
     out = data["root"] / "attacks-test"
     argv = _make_argv(data, out, "--n", "15", "--provider", "fake", "--max-words", "60",
                       "--attacks", "typo_10,synonym_15,zero_width,human_edit_30,llm_paraphrase,"
@@ -426,7 +457,7 @@ def test_make_attacks_eval_sets(data, capsys) -> None:
 
 
 def test_make_attacks_skips_api_attacks(data, monkeypatch) -> None:
-    script = _load_script("make_attacks")
+    script = load_script("make_attacks")
     out = data["root"] / "attacks-noapi"
     assert script.main(_make_argv(data, out, "--n", "5", "--provider", "none",
                                   "--attacks", "typo_5,humanizer")) == 0
@@ -440,7 +471,7 @@ def test_make_attacks_skips_api_attacks(data, monkeypatch) -> None:
 
 
 def test_make_attacks_augmentation(data) -> None:
-    script = _load_script("make_attacks")
+    script = load_script("make_attacks")
     out = data["root"] / "attacks-train"
     with pytest.raises(SystemExit):  # never build training data from an evaluation split
         script.main(_make_argv(data, out, "--share", "0.5", "--split", "test"))
@@ -468,7 +499,7 @@ def test_make_attacks_augmentation(data) -> None:
 
 
 def test_threshold_at_fpr() -> None:
-    script = _load_script("eval_robust")
+    script = load_script("eval_robust")
     p = np.linspace(0, 1, 101)
     t = script.threshold_at_fpr(p, 0.05)
     assert np.mean(p >= t) <= 0.05 and np.mean(p >= t) == pytest.approx(0.05, abs=0.011)
@@ -477,11 +508,11 @@ def test_threshold_at_fpr() -> None:
 
 
 def test_eval_robust_end_to_end(data, capsys) -> None:
-    make = _load_script("make_attacks")
+    make = load_script("make_attacks")
     attacks_dir = data["root"] / "attacks-eval"
     assert make.main(_make_argv(data, attacks_dir, "--n", "20", "--provider", "fake",
                                 "--attacks", "typo_15,homoglyph,llm_paraphrase,human_edit_30")) == 0
-    script = _load_script("eval_robust")
+    script = load_script("eval_robust")
     out = data["root"] / "robust"
     argv = ["--attacks", str(attacks_dir / "attacks.parquet"),
             "--model", f"tfidf={data['tfidf']}", "--model", str(data["length"]),
@@ -537,7 +568,7 @@ def test_eval_robust_scores_a_stacked_model(data) -> None:
     # Unicode attacks no longer move any score (the models normalise text).
     from skolfie.models.stacker import StackedModel, Stacker, operating_points
 
-    make = _load_script("make_attacks")
+    make = load_script("make_attacks")
     attacks_dir = data["root"] / "attacks-unicode"
     assert make.main(_make_argv(data, attacks_dir, "--n", "20", "--provider", "none",
                                 "--attacks", "homoglyph,zero_width")) == 0
@@ -550,7 +581,7 @@ def test_eval_robust_scores_a_stacked_model(data) -> None:
                              operating_points(labels, stacker.predict_proba(P))),
                 data["root"] / "stacked.joblib")
 
-    script = _load_script("eval_robust")
+    script = load_script("eval_robust")
     out = data["root"] / "robust-stacked"
     assert script.main(["--attacks", str(attacks_dir / "attacks.parquet"), "--model",
                         f"stacked={data['root'] / 'stacked.joblib'}",
@@ -566,7 +597,7 @@ def test_eval_robust_scores_a_stacked_model(data) -> None:
 
 
 def test_roadmap_check() -> None:
-    script = _load_script("eval_robust")
+    script = load_script("eval_robust")
     ref = {"clean": {"fpr_05": 0.02, "fpr_at_95tpr": 0.1},
            "attacks": {"t5_paraphrase": {"auroc_drop": 0.2}, "typo_5": {"auroc_drop": 0.1}}}
     good = {"clean": {"fpr_05": 0.022, "fpr_at_95tpr": 0.1},
@@ -596,7 +627,7 @@ def test_evaluate_extra_train(data, capsys) -> None:
     })
     path = data["root"] / "extra.parquet"
     extra.to_parquet(path, index=False)
-    evaluate = _load_script("evaluate")
+    evaluate = load_script("evaluate")
     out = data["root"] / "adv"
     assert evaluate.main(["--corpus", str(data["corpus"]), "--splits", str(data["splits"]),
                           "--model", "length", "--extra-train", str(path),
@@ -617,3 +648,113 @@ def test_evaluate_extra_train(data, capsys) -> None:
         with pytest.raises(SystemExit):
             evaluate.main(["--corpus", str(data["corpus"]), "--splits", str(data["splits"]),
                            "--model", "length", "--extra-train", str(extra_path)])
+
+
+def test_make_attacks_cache_not_reused_after_interrupted_write(data, monkeypatch) -> None:
+    script = load_script("make_attacks")
+    out = data["root"] / "attacks-interrupt"
+    argv = _make_argv(data, out, "--n", "6", "--provider", "none", "--attacks", "typo_10")
+    assert script.main(argv) == 0
+    first = pd.read_parquet(out / "attacks.parquet")
+
+    # A run with another seed is interrupted right after the part file is written.
+    original = pd.DataFrame.to_parquet
+
+    def interrupted(self, path, *args, **kwargs):
+        original(self, path, *args, **kwargs)
+        if "parts" in Path(path).parts:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        script.main(argv[:-2] + ["--seed", "1", "--attacks", "typo_10"])
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", original)
+
+    # Back to the first command: the seed-1 part must not be reused as if it were seed 0.
+    assert script.main(argv) == 0
+    pd.testing.assert_frame_equal(pd.read_parquet(out / "attacks.parquet"), first)
+
+
+def test_make_attacks_corrupt_signature_rebuilds(data, capsys) -> None:
+    script = load_script("make_attacks")
+    out = data["root"] / "attacks-badsig"
+    argv = _make_argv(data, out, "--n", "4", "--provider", "none", "--attacks", "typo_5")
+    assert script.main(argv) == 0
+    (out / "parts" / "typo_5.json").write_text("{not json")
+    capsys.readouterr()
+    assert script.main(argv) == 0
+    assert "reused" not in capsys.readouterr().out
+
+
+def test_make_attacks_share_too_small(data) -> None:
+    script = load_script("make_attacks")
+    with pytest.raises(SystemExit) as exc:
+        script.main(_make_argv(data, data["root"] / "attacks-tiny", "--split", "train",
+                               "--share", "0.001", "--attacks", "typo_5"))
+    assert exc.value.code == 2
+
+
+def test_make_attacks_rejects_path_like_attack_names(data) -> None:
+    script = load_script("make_attacks")
+    for bad in ("../typo_5", "typo_5/../../x", "typo_5\x00"):
+        with pytest.raises(SystemExit):
+            script.main(_make_argv(data, data["root"] / "attacks-bad", "--attacks", bad))
+
+
+def test_make_attacks_never_writes_the_api_key(data, monkeypatch, capsys) -> None:
+    secret = "sk-ant-THIS-IS-SECRET-42"
+    for _, key in load_script("make_attacks").API_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
+    calls = []
+
+    def fake_post(url, headers, payload, timeout):
+        calls.append(headers)
+        assert secret not in url
+        if len(calls) == 1:  # an API error that echoes the key
+            return providers.HTTPResponse(400, {}, json.dumps({"error": f"bad key {secret}"}))
+        words = " ".join(["reworded"] * 30)
+        return providers.HTTPResponse(200, {}, json.dumps({
+            "content": [{"type": "text", "text": words}],
+            "usage": {"input_tokens": 1, "output_tokens": 1}}))
+
+    monkeypatch.setattr(providers, "_http_post", fake_post)
+    out = data["root"] / "attacks-key"
+    assert load_script("make_attacks").main(_make_argv(
+        data, out, "--n", "4", "--provider", "auto", "--workers", "1",
+        "--attacks", "llm_paraphrase,temp_low")) == 0
+    assert any(secret in str(h.values()) for h in calls)  # it was used...
+    captured = capsys.readouterr()
+    assert secret not in captured.out + captured.err  # ...but never printed
+    assert "request 0 failed" in captured.out
+    for path in out.rglob("*"):
+        if path.is_file():
+            assert secret.encode() not in path.read_bytes(), path
+
+
+def test_eval_robust_attack_without_ai_rows(data) -> None:
+    make = load_script("make_attacks")
+    attacks_dir = data["root"] / "attacks-noai"
+    assert make.main(_make_argv(data, attacks_dir, "--n", "10", "--provider", "none",
+                                "--attacks", "typo_5")) == 0
+    df = pd.read_parquet(attacks_dir / "attacks.parquet")
+    df = df[~((df["attack"] == "typo_5") & (df["label"] == "ai"))]
+    path = attacks_dir / "noai.parquet"
+    df.to_parquet(path, index=False)
+    script = load_script("eval_robust")
+    out = data["root"] / "robust-noai"
+    assert script.main(["--attacks", str(path), "--model", str(data["tfidf"]),
+                        "--out-dir", str(out)]) == 0
+    report = json.loads((out / "robust_report.json").read_text())
+    typo = report["models"]["tfidf"]["attacks"]["typo_5"]
+    assert typo["n_ai"] == 0 and typo["auroc"] is None and typo["n_human"] == 10
+    assert "| typo_5 | 0 / 10 |" in (out / "robust_report.md").read_text()
+
+
+def test_threshold_at_fpr_ignores_nan() -> None:
+    script = load_script("eval_robust")
+    p = np.array([np.nan, 0.1, 0.2, 0.3])
+    t = script.threshold_at_fpr(p, 0.0)
+    assert t > 0.3 and np.isfinite(t)
+    assert np.isnan(script.threshold_at_fpr([np.nan], 0.1))
+

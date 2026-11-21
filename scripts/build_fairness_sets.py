@@ -33,14 +33,9 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
 MANIFEST_NAME = "fairness_manifest.json"
-
-
-def _ensure_repo_on_path() -> None:
-    """Allow `python scripts/build_fairness_sets.py` from a checkout without installing."""
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,7 +62,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    _ensure_repo_on_path()
     from skolfie.data import fairness_sets as fs
     from skolfie.eval.report import atomic_path
 

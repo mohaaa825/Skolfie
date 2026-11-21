@@ -7,7 +7,6 @@ in-memory sources (no network, no real dataset loaders).
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from collections import Counter
 from collections.abc import Callable, Iterator
@@ -20,9 +19,7 @@ import pytest
 from skolfie.data import corpus
 from skolfie.data.corpus import EmptyCorpusError, SourceError, build_corpus, clean_text
 from skolfie.data.schema import COLUMNS, Record
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
+from tests.conftest import load_script
 
 # --------------------------------------------------------------------------- #
 # helpers
@@ -299,18 +296,32 @@ def test_streams_generator_once(tmp_path: Path) -> None:
     assert result.n_records == 500
 
 
+def test_empty_text_is_dropped_even_with_min_words_zero(tmp_path: Path) -> None:
+    reg = {"s": fake_source("s", [rec("s", 1, " ​\x00 "), rec("s", 2, "two words", "ai")])}
+    res = build(tmp_path, reg, min_words=0)
+    assert pq.read_table(res.parquet_path).column("text").to_pylist() == ["two words"]
+    assert res.manifest["sources"]["s"]["too_short"] == 1
+
+
+def test_interrupted_write_keeps_the_previous_build(tmp_path: Path, monkeypatch) -> None:
+    out = tmp_path / "out"
+    first = build(tmp_path, {"s": fake_source("s", [rec("s", 1, "word " * 40)])})
+    before = {p.name: p.read_bytes() for p in out.iterdir()}
+
+    def crash():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(corpus, "_git_info", crash)  # runs after the parquet is written
+    with pytest.raises(KeyboardInterrupt):
+        build(tmp_path, {"s": fake_source("s", [rec("s", 2, "other " * 40)])})
+    assert {p.name: p.read_bytes() for p in out.iterdir()} == before
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["corpus_version"] == first.corpus_version
+
+
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
-
-
-def _load_cli():
-    spec = importlib.util.spec_from_file_location("skolfie_build_corpus_script",
-                                                  REPO_ROOT / "scripts" / "build_corpus.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
 
 
 @pytest.fixture()
@@ -321,7 +332,7 @@ def cli(monkeypatch):
         "broken": failing_source("broken", ConnectionError("could not reach https://hf.co/x")),
     }
     monkeypatch.setattr(corpus, "load_registry", lambda: registry)
-    return _load_cli()
+    return load_script("build_corpus")
 
 
 def test_cli_builds_and_continues_past_failure(cli, tmp_path: Path, capsys) -> None:

@@ -65,26 +65,6 @@ LM_FEATURES: tuple[str, ...] = (
     "lm_nll_minus_entropy",
 )
 
-FEATURE_DESCRIPTIONS: dict[str, str] = {
-    "lm_mean_nll": "Average surprise of the language model per token (log-perplexity); "
-    "AI text is usually less surprising.",
-    "lm_std_nll": "How much the per-token surprise varies across the text "
-    "(token-level burstiness).",
-    "lm_p90_nll": "Surprise of the most surprising tokens (90th percentile of per-token surprise).",
-    "lm_sent_mean_nll_std": "How much the average surprise varies from sentence to sentence "
-    "(sentence-level burstiness, as in GPTZero).",
-    "lm_sent_nll_cv": "Sentence-to-sentence variation in surprise relative to the average "
-    "surprise (coefficient of variation).",
-    "lm_mean_log_rank": "Average log rank of each actual token among the model's predictions "
-    "(lower means the text follows the model's top guesses).",
-    "lm_top1_frac": "Share of tokens that were the model's single most likely prediction.",
-    "lm_top10_frac": "Share of tokens that were among the model's 10 most likely predictions.",
-    "lm_mean_entropy": "Average uncertainty of the model's predictions (entropy of the "
-    "predicted next-token distribution).",
-    "lm_nll_minus_entropy": "Average gap between actual and expected surprise per token; "
-    "near or below zero suggests machine-like predictability.",
-}
-
 _IDX = {name: i for i, name in enumerate(LM_FEATURES)}
 _MIN_SENTENCE_TOKENS = 3
 # A sentence ends after a run of . ! ? followed by whitespace, or at a newline.
@@ -138,6 +118,30 @@ def _clean_text(t: Any, clip: int) -> str:
         except UnicodeEncodeError:
             t = t.encode("utf-8", "replace").decode("utf-8")
     return t
+
+
+def _slug(name: str) -> str:
+    """A model id as a file-name-safe cache key part ("Qwen/Qwen2.5" -> "Qwen_Qwen2.5")."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "lm"
+
+
+def _text_token_limit(config: Any, max_tokens: int) -> int:
+    """`max_tokens`, capped at the model's context size minus the BOS slot."""
+    n_pos = getattr(config, "n_positions", None) or getattr(config, "max_position_embeddings", None)
+    return min(max_tokens, int(n_pos) - 1) if n_pos else max_tokens
+
+
+def _padded_batch(batch: list[np.ndarray], bos_id: int,
+                  pad_id: int) -> tuple[np.ndarray, np.ndarray]:
+    """(ids, attention mask) of shape (len(batch), longest + 1): BOS, the tokens, right padding."""
+    seq_len = max(len(x) for x in batch) + 1
+    ids = np.full((len(batch), seq_len), pad_id, dtype=np.int64)
+    mask = np.zeros((len(batch), seq_len), dtype=np.int64)
+    for i, x in enumerate(batch):
+        ids[i, 0] = bos_id
+        ids[i, 1 : len(x) + 1] = x
+        mask[i, : len(x) + 1] = 1
+    return ids, mask
 
 
 def _sentence_ids(text: str, starts: np.ndarray) -> np.ndarray:
@@ -222,8 +226,7 @@ class LMFeaturizer:
     @property
     def cache_key(self) -> str:
         """Identifies model + truncation length, e.g. "gpt2-t512"."""
-        name = re.sub(r"[^A-Za-z0-9._-]+", "_", self.model_name).strip("_") or "lm"
-        return f"{name}-t{self.max_tokens}"
+        return f"{_slug(self.model_name)}-t{self.max_tokens}"
 
     @property
     def feature_names(self) -> tuple[str, ...]:
@@ -266,9 +269,7 @@ class LMFeaturizer:
         self._bos_id = int(bos)
         self._pad_id = int(tok.pad_token_id) if tok.pad_token_id is not None else self._bos_id
 
-        cfg = self.model.config
-        n_pos = getattr(cfg, "n_positions", None) or getattr(cfg, "max_position_embeddings", None)
-        self._n_text = min(self.max_tokens, int(n_pos) - 1) if n_pos else self.max_tokens
+        self._n_text = _text_token_limit(self.model.config, self.max_tokens)
         self._ready = True
 
     # ------------------------------------------------------------------
@@ -305,13 +306,7 @@ class LMFeaturizer:
         import torch
 
         lengths = [len(x) for x in batch]
-        seq_len = max(lengths) + 1
-        ids = np.full((len(batch), seq_len), self._pad_id, dtype=np.int64)
-        mask = np.zeros((len(batch), seq_len), dtype=np.int64)
-        for i, x in enumerate(batch):
-            ids[i, 0] = self._bos_id
-            ids[i, 1 : len(x) + 1] = x
-            mask[i, : len(x) + 1] = 1
+        ids, mask = _padded_batch(batch, self._bos_id, self._pad_id)
         input_ids = torch.from_numpy(ids).to(self.device)
         attn = torch.from_numpy(mask).to(self.device)
 
