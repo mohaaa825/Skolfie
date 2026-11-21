@@ -15,8 +15,8 @@ import pandas as pd
 import pytest
 
 from skolfie.models.baselines import TfidfLRBaseline
+from tests.conftest import load_script
 from tests.test_evaluate import make_corpus, make_splits
-from tests.test_stacker import _load_script
 
 
 @pytest.fixture(scope="module")
@@ -41,7 +41,7 @@ def _argv(data: dict[str, Path], *extra: str) -> list[str]:
 
 def test_eval_mixed_end_to_end(data, capsys) -> None:
     out = data["root"] / "out"
-    assert _load_script("eval_mixed").main(_argv(data, "--out-dir", str(out))) == 0
+    assert load_script("eval_mixed").main(_argv(data, "--out-dir", str(out))) == 0
     assert "mixed_report.md" in capsys.readouterr().out
 
     report = json.loads((out / "mixed_report.json").read_text())
@@ -64,7 +64,7 @@ def test_eval_mixed_end_to_end(data, capsys) -> None:
 
 
 def test_eval_mixed_usage_errors(data) -> None:
-    script = _load_script("eval_mixed")
+    script = load_script("eval_mixed")
     with pytest.raises(SystemExit):
         script.main(_argv(data, "--fit-split", "nope"))
     with pytest.raises(SystemExit):
@@ -73,3 +73,21 @@ def test_eval_mixed_usage_errors(data) -> None:
     missing[missing.index("--model") + 1] = str(data["root"] / "missing.joblib")
     with pytest.raises(SystemExit):
         script.main(missing)
+
+
+def test_eval_mixed_warns_when_fit_and_eval_split_are_the_same(tmp_path: Path, capsys) -> None:
+    corpus = make_corpus(n_per_cell=60, seed=5)
+    splits = make_splits(corpus, seed=5)
+    paths = {"corpus": tmp_path / "corpus.parquet", "splits": tmp_path / "splits.parquet",
+             "model": tmp_path / "tfidf.joblib"}
+    corpus.to_parquet(paths["corpus"], index=False)
+    splits.to_parquet(paths["splits"], index=False)
+    joblib.dump(TfidfLRBaseline().fit(corpus["text"].tolist(), corpus["label"].tolist()),
+                paths["model"])
+    out = tmp_path / "out"
+    assert load_script("eval_mixed").main(
+        _argv(paths, "--fit-split", "test", "--eval-split", "test", "--out-dir", str(out))) == 0
+    assert "optimistic" in capsys.readouterr().err
+    assert json.loads((out / "mixed_report.json").read_text())["fit_split"] == "test"
+    assert not list(out.glob("*.tmp"))
+

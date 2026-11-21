@@ -3,12 +3,12 @@ tests/test_splits.py
 ---------------------
 Tests for skolfie/eval/splits.py and scripts/make_splits.py on a synthetic
 corpus with HC3-style grouped ids, fresh-style prompt ids, several
-generators (including generator families) and several domains.
+generators (including generator families) and several domains, plus an
+end-to-end leak check from build_corpus to make_splits.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 
@@ -17,6 +17,8 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
+from skolfie.data.corpus import normalized_hash
+from skolfie.data.schema import Record
 from skolfie.eval import splits
 from skolfie.eval.splits import (
     SPLITS,
@@ -32,6 +34,8 @@ from skolfie.eval.splits import (
     split_summary,
     write_splits,
 )
+from tests.conftest import load_script
+from tests.test_corpus import build, fake_source, rec
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "splits.json"
@@ -467,21 +471,13 @@ def test_warns_about_missing_held_out_names(tmp_path: Path, corpus: pd.DataFrame
     assert any("'creative'" in w for w in result.manifest["warnings"])
 
 
-def load_script():
-    spec = importlib.util.spec_from_file_location("skolfie_make_splits_script",
-                                                  REPO_ROOT / "scripts" / "make_splits.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_cli(tmp_path: Path, corpus: pd.DataFrame, memberships: pd.DataFrame,
              capsys: pytest.CaptureFixture[str]) -> None:
     corpus_path = write_corpus(tmp_path, corpus)
     out_dir = tmp_path / "splits"
-    code = load_script().main(["--corpus", str(corpus_path), "--config", str(DEFAULT_CONFIG),
-                               "--out-dir", str(out_dir)])
+    code = load_script("make_splits").main(["--corpus", str(corpus_path),
+                                            "--config", str(DEFAULT_CONFIG),
+                                            "--out-dir", str(out_dir)])
     assert code == 0
     printed = capsys.readouterr().out
     assert "## Split sizes" in printed and "test_ood_generator" in printed
@@ -496,7 +492,7 @@ def test_cli(tmp_path: Path, corpus: pd.DataFrame, memberships: pd.DataFrame,
 
 
 def test_cli_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    script = load_script()
+    script = load_script("make_splits")
     assert script.main(["--corpus", str(tmp_path / "missing.parquet"),
                         "--config", str(DEFAULT_CONFIG), "--out-dir", str(tmp_path)]) == 2
     bad = tmp_path / "bad.json"
@@ -506,3 +502,77 @@ def test_cli_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     err = capsys.readouterr().err
     assert "cannot read corpus" in err and "cannot read config" in err
     assert not (tmp_path / "splits.parquet").exists()
+
+
+def test_interrupted_write_keeps_the_previous_splits(tmp_path: Path, monkeypatch) -> None:
+    df = pd.DataFrame({"id": ["a:1", "a:2"], "label": ["human", "ai"],
+                       "generator": ["human", "g"], "domain": ["qa", "qa"],
+                       "source": ["a", "a"], "n_words": [50, 50]})
+    cfg = SplitConfig(fractions={"train": 1.0, "val": 0.0, "test": 0.0})
+    write_splits(df, make_splits(df, cfg), cfg, tmp_path)
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+
+    cfg2 = SplitConfig(fractions={"train": 0.0, "val": 0.0, "test": 1.0})
+
+    def disk_full(self, *args, **kwargs):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(Path, "write_text", disk_full)  # after splits.parquet is written
+    with pytest.raises(OSError):
+        write_splits(df, make_splits(df, cfg2), cfg2, tmp_path)
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+
+
+def test_rejects_null_ids() -> None:
+    df = pd.DataFrame({"id": ["a:1", None], "label": ["human", "ai"],
+                       "generator": ["human", "g"], "domain": ["qa", "qa"],
+                       "source": ["a", "a"], "n_words": [50, 50]})
+    with pytest.raises(ValueError, match="no id"):
+        make_splits(df, SplitConfig())
+
+
+# --------------------------------------------------------------------------- #
+# End to end: corpus -> splits
+# --------------------------------------------------------------------------- #
+def test_no_text_or_question_leaks_across_splits(tmp_path: Path) -> None:
+    """Variants of one text that differ only in case / punctuation / spacing, spread
+    over sources, end up as one row; every answer to one HC3 question stays on one
+    side; test_short and the human part of test_ood_generator come from test."""
+    hc3, other = [], []
+    for q in range(120):
+        base = " ".join(f"q{q}w{j}" for j in range(40))
+        for i in range(2):
+            hc3.append(Record(id=f"hc3:open_qa:{q}:human:{i}", text=f"{base} human{i}",
+                              label="human", generator="human", domain="qa",
+                              subdomain="open_qa", source="hc3"))
+            hc3.append(Record(id=f"hc3:open_qa:{q}:chatgpt:{i}", text=f"{base} bot{i}",
+                              label="ai", generator="chatgpt", domain="qa",
+                              subdomain="open_qa", source="hc3"))
+        gen = "held" if q % 3 == 0 else "gpt-4"
+        # same text as an HC3 human answer, re-cased, re-punctuated, re-spaced
+        other.append(rec("m4gt", f"h{q}", f"{base.upper()}   HUMAN0!!", "human", "qa"))
+        other.append(rec("m4gt", f"a{q}", " ".join(f"m{q}x{j}" for j in range(q % 90 + 30)),
+                         "ai", "qa", generator=gen))
+    res = build(tmp_path, {"hc3": fake_source("hc3", hc3), "m4gt": fake_source("m4gt", other)})
+    table = pq.read_table(res.parquet_path).to_pandas()
+    assert res.manifest["sources"]["m4gt"]["duplicate"] == 120
+
+    cfg = SplitConfig(held_out_generators=["held"])
+    m = make_splits(table, cfg)
+    text = dict(zip(table["id"], table["text"]))
+    side = {"train": "train", "val": "val"}
+    seen: dict[bytes, set[str]] = {}
+    for rid, split in zip(m["id"], m["split"]):
+        seen.setdefault(normalized_hash(text[rid]), set()).add(side.get(split, "test"))
+    assert all(len(s) == 1 for s in seen.values())
+
+    hc3_rows = m[m["id"].str.startswith("hc3:")]
+    question = hc3_rows["id"].str.rsplit(":", n=2).str[0]
+    hc3_side = hc3_rows["split"].map(lambda s: side.get(s, "test"))
+    assert (hc3_side.groupby(question).nunique() == 1).all()
+
+    by_split = m.groupby("split")["id"].apply(set)
+    assert by_split["test_short"] <= by_split["test"]
+    human = set(table.loc[table["label"] == "human", "id"])
+    assert by_split["test_ood_generator"] & human <= by_split["test"]
+    assert not by_split["train"] & (by_split["val"] | by_split["test"])

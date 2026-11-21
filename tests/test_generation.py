@@ -7,10 +7,11 @@ Tests for fresh AI-text generation: the prompt bank, the provider layer
 
 from __future__ import annotations
 
-import importlib.util
 import json
+import logging
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -37,8 +38,7 @@ from skolfie.data.generation.providers import (
     make_provider,
 )
 from skolfie.data.schema import COLUMNS, DOMAINS, Record
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests.conftest import load_script
 
 BODY = (
     "The lighthouse had been dark for eleven years when the letter arrived. Mara turned it over "
@@ -49,14 +49,9 @@ BODY = (
 
 @pytest.fixture(scope="module")
 def gen():
-    spec = importlib.util.spec_from_file_location(
-        "skolfie_generate_script", REPO_ROOT / "scripts" / "generate_ai_texts.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = module  # dataclasses look their module up here
-    spec.loader.exec_module(module)
+    module = load_script("generate_ai_texts")
     yield module
-    sys.modules.pop(spec.name, None)
+    sys.modules.pop(module.__name__, None)
 
 
 @pytest.fixture(autouse=True)
@@ -300,6 +295,20 @@ def test_output_path_and_generator_naming(gen, tmp_path: Path) -> None:
     assert providers.resolve_model("gemini", "models/gemini-3.8-flash") == "gemini-3.8-flash"
 
 
+@pytest.mark.parametrize("flag", [["--timeout", "0"], ["--max-retries", "-1"]])
+def test_cli_rejects_bad_retry_flags(gen, flag) -> None:
+    with pytest.raises(SystemExit) as info:
+        gen.main(["--provider", "fake", "--n", "1", "--dry-run", *flag])
+    assert info.value.code == 2
+
+
+@pytest.mark.parametrize("generator", ["../../etc/passwd", "..", "a/b\\c", "/abs", "x:y\x00z"])
+def test_output_path_stays_in_out_dir(gen, tmp_path, generator) -> None:
+    path = gen.output_path(tmp_path, generator)
+    assert path.parent == tmp_path and path.name.endswith(".jsonl")
+    assert not path.name.startswith(".")
+
+
 def test_cli_missing_key_and_model(gen, tmp_path: Path, capsys, no_network) -> None:
     assert gen.main(["--provider", "openai", "--n", "3", "--out-dir", str(tmp_path)]) == 2
     assert "OPENAI_API_KEY" in capsys.readouterr().err
@@ -528,6 +537,90 @@ def test_openrouter_preset(monkeypatch) -> None:
     assert req["payload"]["max_tokens"] == 100 + 4096   # room for reasoning tokens
 
 
+# --------------------------------------------------------------------------- #
+# Provider robustness and secret handling
+# --------------------------------------------------------------------------- #
+KEY = "sk-live-0123456789abcdef"
+OPENAI_OK = {"choices": [{"message": {"content": "Hi there."}, "finish_reason": "stop"}]}
+
+
+def _openai(**kw) -> OpenAIProvider:
+    return OpenAIProvider("gpt-4o", api_key=KEY, backoff_base=0.0, **kw)
+
+
+def test_body_cut_off_mid_transfer_is_retried(monkeypatch, sleeps) -> None:
+    requests = pytest.importorskip("requests")
+    calls = []
+
+    def post(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise requests.exceptions.ChunkedEncodingError("IncompleteRead")
+        return SimpleNamespace(status_code=200, headers={}, text=json.dumps(OPENAI_OK))
+
+    monkeypatch.setattr(requests, "post", post)
+    p = _openai(max_retries=2)
+    assert p.generate("x", temperature=0.5, max_tokens=5) == "Hi there."
+    assert p.stats.retries == 1
+
+
+@pytest.mark.parametrize("body", ["<html>502 Bad Gateway</html>", "[1, 2]", '"text"'])
+def test_2xx_without_a_json_object_is_a_provider_error(monkeypatch, sleeps, body) -> None:
+    http = FakeHTTP(HTTPResponse(200, {}, body))
+    monkeypatch.setattr(providers, "_http_post", http)
+    p = _openai(max_retries=3)
+    with pytest.raises(ProviderError, match="without a JSON object") as info:
+        p.generate("x", temperature=0.5, max_tokens=5)
+    assert info.value.status == 200
+    assert len(http.requests) == 1 and p.stats.failures == 1
+
+
+def test_api_key_echoed_by_server_is_masked(monkeypatch) -> None:
+    echo = err(400, f"bad auth header: {{'Authorization': 'Bearer {KEY}'}}")
+    monkeypatch.setattr(providers, "_http_post", FakeHTTP(echo))
+    p = _openai()
+    with pytest.raises(ProviderError) as info:
+        p.generate("x", temperature=0.5, max_tokens=5)
+    assert KEY not in str(info.value) and KEY not in info.value.body
+    assert "***" in info.value.body
+    # nor in the stats, the repr or a transient error
+    assert KEY not in repr(p) and KEY not in repr(p.stats)
+    monkeypatch.setattr(providers, "_http_post",
+                        FakeHTTP(TransientHTTPError(f"reset while sending {KEY}")))
+    with pytest.raises(ProviderError) as info:
+        _openai(max_retries=0).generate("x", temperature=0.5, max_tokens=5)
+    assert KEY not in str(info.value)
+
+
+def test_short_test_keys_do_not_mangle_messages() -> None:
+    assert providers.redact("max_tokens", "k") == "max_tokens"
+
+
+@pytest.mark.parametrize("kwargs", [{"max_retries": -1}, {"timeout": 0}, {"timeout": -5.0}])
+def test_bad_retry_or_timeout_settings_are_rejected(kwargs) -> None:
+    with pytest.raises(ProviderConfigError):
+        _openai(**kwargs)
+
+
+@pytest.mark.parametrize("url", ["localhost:11434/v1", "ftp://example.com", "https://", ""])
+def test_base_url_needs_http_scheme_and_host(url) -> None:
+    with pytest.raises(ProviderConfigError):
+        OpenAIProvider("gpt-4o", api_key=KEY, base_url=url or "x")
+
+
+def test_plain_http_to_remote_host_with_key_warns(caplog) -> None:
+    with caplog.at_level(logging.WARNING, logger=providers.__name__):
+        OpenAICompatibleProvider("m", base_url="http://localhost:11434/v1", api_key=KEY)
+        OpenAICompatibleProvider("m", base_url="http://example.com/v1")  # no key: nothing sent
+        assert not caplog.records
+        OpenAICompatibleProvider("m", base_url="http://example.com/v1", api_key=KEY)
+    assert len(caplog.records) == 1 and "plain http" in caplog.text
+    assert KEY not in caplog.text
+
+
+# --------------------------------------------------------------------------- #
+# Student-essay plan
+# --------------------------------------------------------------------------- #
 def test_student_plan_and_plain_text(gen, tmp_path, capsys) -> None:
     assert gen.main(["--provider", "fake", "--plan", "student", "--n", "8", "--dry-run",
                      "--out-dir", str(tmp_path)]) == 0

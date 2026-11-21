@@ -213,3 +213,11 @@ def test_progress_prints(tiny, capsys):
     make(tiny, batch_size=2).features(TEXTS, progress=True)
     out = capsys.readouterr().out
     assert f"{len(TEXTS)}/{len(TEXTS)}" in out
+
+
+def test_surrogates_and_nan_inputs(tiny):
+    out = make(tiny).features(["a\ud800b", "a?b", float("nan"), None, "​‏😀 Привет."])
+    np.testing.assert_allclose(out[0], out[1])
+    assert np.isnan(out[2]).all() and np.isnan(out[3]).all()
+    assert np.isfinite(out[4]).all()
+

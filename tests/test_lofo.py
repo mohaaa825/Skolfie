@@ -234,7 +234,7 @@ def test_run_family_skips_oversampling_a_source_with_no_train_rows(base, corpus)
 
 def test_eval_lofo_cli(base, corpus, tmp_path, monkeypatch, capsys) -> None:
     import skolfie.models.baselines as baselines
-    from tests.test_modern_data import _script
+    from tests.conftest import load_script
 
     corpus.reset_index(drop=True).to_parquet(tmp_path / "corpus.parquet", index=False)
     specs = []
@@ -244,7 +244,7 @@ def test_eval_lofo_cli(base, corpus, tmp_path, monkeypatch, capsys) -> None:
         return MarkerScorer(blind=("haiku",))
 
     monkeypatch.setattr(baselines, "make_scorer", fake_make_scorer)
-    script = _script("eval_lofo")
+    script = load_script("eval_lofo")
     out = tmp_path / "lofo"
     assert script.main(["--corpus", str(tmp_path / "corpus.parquet"), "--config", str(CONFIG),
                         "--families", "gpt-3.5", "--oversample", "fresh=3",

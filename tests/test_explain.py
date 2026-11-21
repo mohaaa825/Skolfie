@@ -9,6 +9,7 @@ to end on the synthetic evaluation corpus.
 from __future__ import annotations
 
 import json
+import re
 from functools import partial
 from pathlib import Path
 
@@ -26,8 +27,8 @@ from skolfie.mixed.detector import ChunkRule
 from skolfie.models.baselines import LengthBaseline, TfidfLRBaseline
 from skolfie.robust.attacks import homoglyph_text, text_rng, zero_width_text
 from skolfie.robust.normalize import obfuscation_note, obfuscation_stats
+from tests.conftest import load_script
 from tests.test_evaluate import make_corpus, make_splits
-from tests.test_stacker import _load_script
 
 ALL_FEATURES = (*STYLE_FEATURES, *LM_FEATURES, *BINO_FEATURES, *DELTA_FEATURES)
 CHUNKER = partial(chunk_spans, target_words=20, min_words=8)
@@ -344,6 +345,63 @@ def test_render_markdown_review_sheet() -> None:
         render_markdown([_fake_explanation(text)], [text], cases=[])
 
 
+def _one_feature_explanation(text: str, feature: str = "sty_mattr50",
+                             direction: str = "ai") -> dict:
+    return {
+        "label": "ai", "verdict": "ai", "p_ai": 0.9,
+        "chunks": [{"start": 0, "end": len(text), "p": 0.9, "label": "ai"}],
+        "top_features": [{"feature": feature, "value": 0.4, "typical_human": 0.7,
+                          "typical_ai": 0.5, "contribution": 1.0, "direction": direction,
+                          "reason": "r"}],
+        "feature_model": {"p_ai": 0.8},
+    }
+
+
+def test_render_html_attribute_and_class_injection() -> None:
+    from skolfie.explain.render import render_html
+
+    text = 'He said "hi" & <img src=x onerror=alert(1)> `code` | pipe'
+    ex = _one_feature_explanation(text, feature='f"><script>x</script>', direction='ai" onclick="x')
+    page = render_html([ex], [text], captions=['" onmouseover="x'],
+                       title="<script>t</script>")
+    assert "<script>" not in page and "<img" not in page
+    assert 'onclick="' not in page and 'onmouseover="' not in page
+    assert "&quot;hi&quot;" in page
+
+
+def _cells(row: str) -> int:
+    """Number of cells in a Markdown table row (escaped pipes do not split)."""
+    return len(re.split(r"(?<!\\)\|", row.strip().strip("|")))
+
+
+def test_render_markdown_tables_and_links() -> None:
+    from skolfie.explain.render import md_escape, render_markdown
+
+    text = "Look ![pixel](http://evil.example/p.png) and [click](javascript:alert(1)) now."
+    md = render_markdown([_one_feature_explanation(text, feature="a|b`c")], [text],
+                         cases=[{"id": "x](http://evil)", "true_label": "ai"}])
+    rows = [ln for ln in md.splitlines() if ln.startswith("| 1 | ")]
+    # The checklist row (8 cells), the feature row (7) and the chunk row (4).
+    assert sorted(_cells(r) for r in rows) == [4, 7, 8]
+    # No live link or image from user text.
+    assert not re.search(r"(?<!\\)\]\(", md)
+    assert md_escape("[a](b)") == "\\[a\\](b)"
+
+
+def test_render_handles_missing_scores() -> None:
+    """Explanations are JSON-safe, so a NaN score arrives as None."""
+    from skolfie.explain.render import render_html, render_markdown
+
+    text = "Some text here."
+    ex = _one_feature_explanation(text)
+    ex["p_ai"] = None
+    ex["chunks"][0]["p"] = None
+    ex["top_features"][0]["contribution"] = None
+    assert "n/a" in render_html([ex], [text])
+    assert "n/a" in render_markdown([ex], [text])
+
+
+
 # --------------------------------------------------------------------------- #
 # scripts/explain.py
 # --------------------------------------------------------------------------- #
@@ -379,7 +437,7 @@ def _argv(data: dict[str, Path], *extra: str) -> list[str]:
 
 def test_explain_script_end_to_end(data, capsys) -> None:
     out = data["root"] / "out"
-    script = _load_script("explain")
+    script = load_script("explain")
     argv = _argv(data, "--n", "8", "--reference-n", "20", "--batch-size", "3",
                  "--mixed-report", str(data["root"] / "mixed_report.json"),
                  "--out-dir", str(out))
@@ -430,7 +488,7 @@ def test_explain_script_with_stacked_model(data) -> None:
                            {"ai_threshold": 0.8, "human_threshold": 0.2})
     joblib.dump(stacked, root / "stacked.joblib")
 
-    script = _load_script("explain")
+    script = load_script("explain")
     loaded = joblib.load(root / "stacked.joblib")
     features = script.reuse_or_load(loaded, root / "stacked.joblib", members["features"])
     assert features is loaded._member("features").obj
@@ -451,7 +509,7 @@ def test_explain_script_with_stacked_model(data) -> None:
 
 
 def test_explain_script_usage_errors(data) -> None:
-    script = _load_script("explain")
+    script = load_script("explain")
     with pytest.raises(SystemExit):
         script.main(_argv(data, "--split", "nope"))
     with pytest.raises(SystemExit):
@@ -468,9 +526,20 @@ def test_stratified_ids() -> None:
 
     df = pd.DataFrame({"label": ["human"] * 3 + ["ai"] * 10},
                       index=[f"h{i}" for i in range(3)] + [f"a{i}" for i in range(10)])
-    script = _load_script("explain")
+    script = load_script("explain")
     ids = script.stratified_ids(df, 8, seed=0)
     assert len(ids) == len(set(ids)) == 8
     assert sum(i.startswith("h") for i in ids) == 3  # topped up with AI texts
     assert script.stratified_ids(df, 8, seed=0) == ids
     assert len(script.stratified_ids(df, 50, seed=0)) == 13
+
+
+def test_explain_corrupt_mixed_report_is_a_usage_error(tmp_path: Path) -> None:
+    script = load_script("explain")
+    bad = tmp_path / "mixed_report.json"
+    bad.write_text('{"rules": {"chunk"')  # half-written
+    args = script.build_parser().parse_args(["--corpus", "c", "--splits", "s", "--model", "m",
+                                             "--mixed-report", str(bad)])
+    with pytest.raises(SystemExit):
+        script.chunk_settings(args, script.build_parser())
+

@@ -3,28 +3,16 @@
 from __future__ import annotations
 
 import csv
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 from skolfie.eval import splits as splits_mod
+from tests.conftest import load_script
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 HEADER = ["Essay Number", "Model Used", "Grade Level", "Essay Type", "Target Length", "Prompt",
           "Generated Essay"]
 BODY = ("So, last week in biology we did a lab on enzymes and temperature, and honestly it was "
         "a lot. We tested catalase at four temperatures and watched it fizz. ") * 3
-
-
-def _script():
-    name = "import_csv_essays_under_test"
-    spec = importlib.util.spec_from_file_location(name, REPO_ROOT / "scripts" /
-                                                  "import_csv_essays.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def _row(n: int, model: str, topic: str, text: str, kind: str = "book review") -> list:
@@ -43,7 +31,7 @@ def _csv(tmp_path: Path, rows: list) -> Path:
 
 
 def test_strip_markdown_keeps_words_and_prices() -> None:
-    imp = _script()
+    imp = load_script("import_csv_essays")
     text = ("# Lab Report\n**Hypothesis:** it *will* fizz  \n* tube one\n"
             "We used $M_1V_1 = M_2V_2$ and $0.1\\text{ M}$ NaOH, so $x$ was found. "
             "A $10 shirt and a $20 hat cost less than $\\text{CO}_2$ damage.")
@@ -55,7 +43,7 @@ def test_strip_markdown_keeps_words_and_prices() -> None:
 
 
 def test_import_csv_writes_records_grouped_by_topic_and_grade(tmp_path: Path, capsys) -> None:
-    imp = _script()
+    imp = load_script("import_csv_essays")
     rows = [_row(1, "models/gemini-3.1-flash-lite", "the water cycle", "**Title:** x\n\n" + BODY),
             _row(2, "models/gemini-3.1-flash-lite", "the water cycle", BODY,
                  kind="personal narrative"),
@@ -82,7 +70,7 @@ def test_import_csv_writes_records_grouped_by_topic_and_grade(tmp_path: Path, ca
 
 
 def test_import_csv_rejects_a_bad_file(tmp_path: Path) -> None:
-    imp = _script()
+    imp = load_script("import_csv_essays")
     bad = tmp_path / "bad.csv"
     bad.write_text("a,b\n1,2\n", encoding="utf-8")
     assert imp.main([str(bad), "--out-dir", str(tmp_path / "o")]) == 2

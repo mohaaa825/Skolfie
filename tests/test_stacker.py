@@ -8,7 +8,6 @@ evaluation corpus (with the length and TF-IDF baselines as members).
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 
@@ -27,9 +26,8 @@ from skolfie.models.stacker import (
     verdict_table,
     verdicts,
 )
+from tests.conftest import load_script
 from tests.test_evaluate import make_corpus, make_splits
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _members(n: int = 4000, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
@@ -154,22 +152,13 @@ def test_stacked_model_round_trip(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 # scripts/stack.py end to end
 # --------------------------------------------------------------------------- #
-def _load_script(name: str):
-    spec = importlib.util.spec_from_file_location(f"skolfie_{name}_script",
-                                                  REPO_ROOT / "scripts" / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
 @pytest.fixture(scope="module")
 def reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     root = tmp_path_factory.mktemp("stackdata")
     corpus = make_corpus(n_per_cell=16, seed=3)
     corpus.to_parquet(root / "corpus.parquet", index=False)
     make_splits(corpus, seed=3).to_parquet(root / "splits.parquet", index=False)
-    evaluate = _load_script("evaluate")
+    evaluate = load_script("evaluate")
     for model in ("length", "tfidf"):
         assert evaluate.main([
             "--corpus", str(root / "corpus.parquet"), "--splits", str(root / "splits.parquet"),
@@ -180,7 +169,7 @@ def reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
 
 def test_stack_script_end_to_end(reports, capsys) -> None:
     root = reports["root"]
-    stack = _load_script("stack")
+    stack = load_script("stack")
     out = root / "stacked"
     argv = ["--corpus", str(reports["corpus"]), "--splits", str(reports["splits"]),
             "--member", f"length={root / 'length' / 'predictions.parquet'}",
@@ -215,7 +204,7 @@ def test_stack_script_end_to_end(reports, capsys) -> None:
 
 
 def test_load_member_averages_small_split_differences(tmp_path: Path, capsys) -> None:
-    stack = _load_script("stack")
+    stack = load_script("stack")
     path = tmp_path / "p.parquet"
     pd.DataFrame({"id": ["a", "a", "b"], "split": ["test", "test_short", "test"],
                   "p_ai": [0.9000, 0.9004, 0.2]}).to_parquet(path)
@@ -230,7 +219,7 @@ def test_load_member_averages_small_split_differences(tmp_path: Path, capsys) ->
 
 
 def test_stack_script_usage_errors(reports) -> None:
-    stack = _load_script("stack")
+    stack = load_script("stack")
     root = reports["root"]
     base = ["--corpus", str(reports["corpus"]), "--splits", str(reports["splits"])]
     member = ["--member", f"length={root / 'length' / 'predictions.parquet'}"]
@@ -244,3 +233,38 @@ def test_stack_script_usage_errors(reports) -> None:
         stack.main(base + member + ["--save-model", str(root / "m.joblib")])
     with pytest.raises(SystemExit):
         stack.main(base + member + ["--fit-split", "nope"])
+
+
+def test_stacked_model_names_the_missing_member() -> None:
+    pytest.importorskip("sklearn")
+    stacker = Stacker().fit(np.array([[0.1], [0.9], [0.2], [0.8]]), [0, 1, 0, 1])
+    model = StackedModel({"features": "/content/drive/MyDrive/skolfie/models/f.joblib"},
+                         stacker, {"ai_threshold": 0.5, "human_threshold": 0.5})
+    with pytest.raises(FileNotFoundError, match="member 'features'.*model.members"):
+        model.predict_proba(["text"])
+
+
+def test_stack_cutoffs_come_from_out_of_fold_val_scores(tmp_path: Path) -> None:
+    pytest.importorskip("sklearn")
+    corpus = make_corpus(n_per_cell=16, seed=5)
+    corpus.to_parquet(tmp_path / "corpus.parquet", index=False)
+    make_splits(corpus, seed=5).to_parquet(tmp_path / "splits.parquet", index=False)
+    evaluate = load_script("evaluate")
+    base = ["--corpus", str(tmp_path / "corpus.parquet"),
+            "--splits", str(tmp_path / "splits.parquet")]
+    assert evaluate.main(base + ["--model", "length", "--out-dir", str(tmp_path / "length"),
+                                 "--save-predictions"]) == 0
+    stack = load_script("stack")
+    assert stack.main(base + ["--member", f"length={tmp_path / 'length' / 'predictions.parquet'}",
+                              "--out-dir", str(tmp_path / "stacked"), "--save-predictions",
+                              "--max-fpr", "0.2"]) == 0
+    report = json.loads((tmp_path / "stacked" / "report.json").read_text())
+    preds = pd.read_parquet(tmp_path / "stacked" / "predictions.parquet")
+    val = preds[preds["split"] == "val"]
+    cut = report["verdicts"]["cutoffs"]
+    human = val.loc[val["label"] == "human", "p_ai"].to_numpy()
+    # The val rows are the out-of-fold scores the cut-offs were set on, so the
+    # AI cut-off is one of the human val scores and honours max_fpr on them.
+    assert np.isclose(human, cut["ai_threshold"]).any()
+    assert (human > cut["ai_threshold"]).mean() <= 0.2
+

@@ -7,7 +7,6 @@ report writer, and scripts/evaluate.py on a small synthetic corpus + splits.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 
@@ -16,7 +15,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from skolfie.eval.report import EVAL_SPLITS, compare_reports, stratified_sample
+from skolfie.eval.report import (
+    EVAL_SPLITS,
+    _filter_extra_train,
+    atomic_path,
+    compare_reports,
+    render_report_md,
+    stratified_sample,
+    write_report,
+)
 from skolfie.models.baselines import (
     AIDetectorAdapter,
     JoblibScorer,
@@ -24,8 +31,7 @@ from skolfie.models.baselines import (
     TfidfLRBaseline,
     make_scorer,
 )
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests.conftest import load_script
 
 _HUMAN_WORDS = ("honestly i think we went there and it was kinda fun but the bus was late "
                 "lol my friend said nope so we just walked home and grabbed pizza").split()
@@ -105,12 +111,7 @@ def data_files(tmp_path_factory: pytest.TempPathFactory, corpus: pd.DataFrame) -
 
 @pytest.fixture(scope="module")
 def evaluate():
-    spec = importlib.util.spec_from_file_location("skolfie_evaluate_script",
-                                                  REPO_ROOT / "scripts" / "evaluate.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_script("evaluate")
 
 
 def _strict_json(path: Path) -> dict:
@@ -329,3 +330,118 @@ def test_cli_feature_model_cache_and_saved_model(evaluate, data_files, tmp_path:
     assert reloaded["train"]["pretrained"] is True
     for split, res in report["results"].items():
         assert reloaded["results"][split]["metrics"]["auroc"] == res["metrics"]["auroc"]
+
+
+# --------------------------------------------------------------------------- #
+# --extra-train leakage filter
+# --------------------------------------------------------------------------- #
+@pytest.fixture()
+def tiny_corpus() -> tuple[pd.DataFrame, pd.DataFrame]:
+    ids = ["v1", "t1", "s1", "tr1"]
+    corpus = pd.DataFrame({"id": ids, "label": ["ai", "human", "ai", "human"],
+                           "text": ["Eval text one.", "A test text.", "Short one.",
+                                    "A train text."]})
+    corpus.index = pd.Index(ids)
+    splits = pd.DataFrame({"id": ["v1", "t1", "t1", "s1", "tr1"],
+                           "split": ["val", "test", "test_short", "test_custom", "train"]})
+    return corpus, splits
+
+
+def test_extra_train_drops_case_and_punctuation_variants_of_eval_texts(tiny_corpus) -> None:
+    corpus, splits = tiny_corpus
+    extra = pd.DataFrame({"text": ["EVAL text one!", "eval  text\none", "A train text.",
+                                   "fresh"], "label": ["ai"] * 4})
+    logs: list[str] = []
+    kept, info = _filter_extra_train(extra, corpus, splits, logs.append)
+    assert kept["text"].tolist() == ["A train text.", "fresh"]
+    assert info["n_dropped_eval_overlap"] == 2
+    assert any("no orig_id" in m for m in logs)
+
+
+def test_extra_train_drops_rows_from_any_non_train_split(tiny_corpus) -> None:
+    corpus, splits = tiny_corpus
+    extra = pd.DataFrame({"text": ["x1", "x2", "x3", "x4"], "label": ["ai"] * 4,
+                          "orig_id": ["s1", "t1", "tr1", "unknown"]})
+    kept, _ = _filter_extra_train(extra, corpus, splits, lambda m: None)
+    assert kept["orig_id"].tolist() == ["tr1", "unknown"]
+
+
+def test_extra_train_orig_id_matches_across_dtypes() -> None:
+    corpus = pd.DataFrame({"id": [1, 2], "text": ["a b", "c d"], "label": ["ai", "human"]},
+                          index=[1, 2])
+    splits = pd.DataFrame({"id": [1, 2], "split": ["test", "train"]})
+    extra = pd.DataFrame({"text": ["z", "y"], "label": ["ai", "ai"], "orig_id": ["1", "2"]})
+    kept, _ = _filter_extra_train(extra, corpus, splits, lambda m: None)
+    assert kept["orig_id"].tolist() == ["2"]
+
+
+
+# --------------------------------------------------------------------------- #
+# Report writing, rendering and comparison
+# --------------------------------------------------------------------------- #
+def _report(group: str = "gpt") -> dict:
+    return {
+        "model": {"name": "m", "spec": "m", "class": "C"},
+        "train": {"pretrained": True}, "corpus": {}, "splits": {},
+        "results": {"test": {
+            "metrics": {"n": 1, "n_ai": 1, "n_human": 0, "auroc": None, "notes": []},
+            "breakdown": {"generator": [{
+                "group": group, "n": 1, "n_ai": 1, "n_human": 0, "accuracy": 1.0,
+                "recall_ai": 1.0, "fpr_human": None, "auroc": None}]}}},
+    }
+
+
+def test_atomic_path_keeps_the_old_file_on_failure(tmp_path: Path) -> None:
+    target = tmp_path / "sub" / "model.joblib.gz"
+    with atomic_path(target) as tmp:
+        assert tmp.name.endswith("model.joblib.gz") and tmp.parent == target.parent
+        tmp.write_text("v1")
+    with pytest.raises(RuntimeError), atomic_path(target) as tmp:
+        tmp.write_text("half")
+        raise RuntimeError("killed")
+    assert target.read_text() == "v1"
+    assert [p.name for p in target.parent.iterdir()] == ["model.joblib.gz"]
+
+
+def test_write_report_files_are_complete(tmp_path: Path) -> None:
+    preds = pd.DataFrame({"id": ["a"], "split": ["test"], "label": ["ai"], "p_ai": [0.9]})
+    paths = write_report(_report(), tmp_path / "out", preds)
+    assert json.loads(paths["json"].read_text())["model"]["name"] == "m"
+    assert paths["md"].read_text().startswith("# Report card: m")
+    assert len(pd.read_parquet(paths["predictions"])) == 1
+    assert sorted(p.name for p in (tmp_path / "out").iterdir()) == [
+        "predictions.parquet", "report.json", "report.md"]
+
+
+def test_markdown_cells_cannot_break_the_table_or_inject_html() -> None:
+    md = render_report_md(_report("gpt\n| x | y |\n<img src=x onerror=alert(1)>"))
+    row = [line for line in md.splitlines() if line.startswith("| gpt")]
+    assert len(row) == 1
+    assert "<img" not in md and "&lt;img" in row[0] and "\\| x \\|" in row[0]
+
+
+def test_compare_rejects_files_that_are_not_reports(tmp_path: Path) -> None:
+    bad = tmp_path / "robust_report.json"
+    bad.write_text(json.dumps({"rows": []}))
+    with pytest.raises(ValueError, match="not a report.json"):
+        compare_reports([bad])
+
+
+def test_compare_handles_minimal_old_reports(tmp_path: Path) -> None:
+    old = _report()
+    for key in ("corpus", "splits", "train"):
+        del old[key]
+    path = tmp_path / "old" / "report.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(old))
+    out = compare_reports([path, path])
+    assert "| test | m (old) |" in out
+
+
+def test_evaluate_compare_turns_bad_files_into_usage_errors(tmp_path: Path) -> None:
+    evaluate = load_script("evaluate")
+    bad = tmp_path / "report.json"
+    bad.write_text("{not json")
+    with pytest.raises(SystemExit):
+        evaluate.main(["--compare", str(bad)])
+
