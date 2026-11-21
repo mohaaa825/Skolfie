@@ -32,7 +32,7 @@ Offsets are character offsets into the text, so `text[start:end]` is the
 span: chunks are cut from the text as given, and each chunk is normalised
 inside the scorers' predict_proba, so the offsets never shift. Everything
 is plain Python (floats, ints, strings, None), so the dict is JSON as it
-is; step 11's API returns it.
+is; `skolfie.service.Detector` returns it.
 
 The verdict model is any scorer with `predict_proba(texts)`. Its verdict
 comes from its `cutoffs` (a `StackedModel`), else from `predict()` when that
@@ -75,6 +75,14 @@ def same_file(a: Any, b: Any) -> bool:
         return False
 
 
+def stacked_members(model: Any) -> Optional[dict[str, str]]:
+    """The {name: path} members of a StackedModel (duck-typed), else None."""
+    members = getattr(model, "members", None)
+    if isinstance(members, dict) and callable(getattr(model, "_member", None)):
+        return members
+    return None
+
+
 def reuse_or_load(verdict_model: Any, model_path: Any, path: Any) -> Any:
     """
     The model saved at `path`, reusing `verdict_model` (loaded from `model_path`) or one
@@ -86,11 +94,9 @@ def reuse_or_load(verdict_model: Any, model_path: Any, path: Any) -> Any:
     """
     if same_file(path, model_path):
         return verdict_model
-    members = getattr(verdict_model, "members", None)
-    if isinstance(members, dict) and callable(getattr(verdict_model, "_member", None)):
-        for name, member_path in members.items():
-            if same_file(path, member_path):
-                return verdict_model._member(name).obj
+    for name, member_path in (stacked_members(verdict_model) or {}).items():
+        if same_file(path, member_path):
+            return verdict_model._member(name).obj
     return load_model(path)
 
 
@@ -114,12 +120,10 @@ def find_feature_model(model: Any) -> Any:
 
     if isinstance(model, FeatureModel):
         return model
-    members = getattr(model, "members", None)
-    if isinstance(members, dict) and callable(getattr(model, "_member", None)):
-        for name in members:
-            obj = getattr(model._member(name), "obj", None)
-            if isinstance(obj, FeatureModel):
-                return obj
+    for name in stacked_members(model) or {}:
+        obj = getattr(model._member(name), "obj", None)
+        if isinstance(obj, FeatureModel):
+            return obj
     return None
 
 

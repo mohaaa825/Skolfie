@@ -102,7 +102,24 @@ def _heatmap_html(text: str, chunks: Sequence[dict]) -> str:
 
 def _badge(label: str) -> str:
     color = _LABEL_COLORS.get(label, "#555")
-    return f'<span class="badge" style="background: {color}">{html.escape(label.upper())}</span>'
+    text = html.escape(label.replace("_", " ").upper())
+    return f'<span class="badge" style="background: {color}">{text}</span>'
+
+
+def _legend(extra: str = "") -> str:
+    """The heatmap legend; `extra` continues its sentence."""
+    return ('<p class="legend">Chunks: <span style="background: '
+            f'{_tint(0.95)}">scored AI</span><span style="background: {_tint(0.05)}">scored '
+            f"human</span>(stronger colour = more confident; hover a chunk for its score)"
+            f"{extra}</p>")
+
+
+def _page(title: str, body: Sequence[str]) -> str:
+    """A self-contained HTML document around `body`."""
+    return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"<title>{html.escape(title)}</title><style>{_CSS}</style></head><body>"
+            + "\n".join(body) + "</body></html>\n")
 
 
 def _features_html(rows: Sequence[dict]) -> str:
@@ -146,11 +163,8 @@ def render_html(explanations: Sequence[dict], texts: Sequence[str],
         raise ValueError("captions and texts must have the same length")
     body = [
         f"<h1>{html.escape(title)}</h1>",
-        '<p class="legend">Chunks: <span style="background: '
-        f'{_tint(0.95)}">scored AI</span><span style="background: {_tint(0.05)}">scored '
-        "human</span>(stronger colour = more confident; hover a chunk for its score). "
-        "Features: the feature model's top SHAP contributions in log-odds; positive pushes "
-        "towards AI.</p>",
+        _legend(". Features: the feature model's top SHAP contributions in log-odds; positive "
+                "pushes towards AI."),
     ]
     for i, (ex, text) in enumerate(zip(explanations, texts)):
         caption = captions[i] if captions is not None else f"Text {i + 1}"
@@ -172,10 +186,7 @@ def render_html(explanations: Sequence[dict], texts: Sequence[str],
             f'<div class="text">{_heatmap_html(text, ex.get("chunks") or [])}</div>'
             f"{_features_html(ex.get('top_features') or [])}"
             "</section>")
-    return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
-            '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            f"<title>{html.escape(title)}</title><style>{_CSS}</style></head><body>"
-            + "\n".join(body) + "</body></html>\n")
+    return _page(title, body)
 
 
 def render_result_html(result: dict, text: str, title: str = "Skolfie report") -> str:
@@ -184,15 +195,12 @@ def render_result_html(result: dict, text: str, title: str = "Skolfie report") -
     headline and AI likelihood, warnings and notes, the chunk heatmap, the reasons with
     their features, and the disclaimer.
     """
-    label = str(result.get("label") or "")
-    color = _LABEL_COLORS.get(label, "#555")
     p_ai = result.get("p_ai")
     likelihood = "n/a" if p_ai is None else f"{_num(100 * float(p_ai), '.0f')}%"
     body = [
         f"<h1>{html.escape(title)}</h1>",
         '<section class="case">'
-        f'<h2><span class="badge" style="background: {color}">'
-        f"{html.escape(label.replace('_', ' ').upper())}</span> "
+        f"<h2>{_badge(str(result.get('label') or ''))} "
         f"{html.escape(str(result.get('headline') or ''))}</h2>"
         f'<div class="meta">AI likelihood {html.escape(likelihood)} &middot; '
         f"{int(result.get('n_words') or 0):,} words"
@@ -203,10 +211,7 @@ def render_result_html(result: dict, text: str, title: str = "Skolfie report") -
     for note in result.get("notes") or []:
         body.append(f'<p class="note">{html.escape(str(note))}</p>')
     if result.get("chunks"):
-        body.append(
-            '<p class="legend">Chunks: <span style="background: '
-            f'{_tint(0.95)}">scored AI</span><span style="background: {_tint(0.05)}">scored '
-            "human</span>(stronger colour = more confident; hover a chunk for its score)</p>")
+        body.append(_legend())
     body.append(f'<div class="text">{_heatmap_html(text, result.get("chunks") or [])}</div>')
     reasons = result.get("reasons") or []
     if reasons:
@@ -217,10 +222,7 @@ def render_result_html(result: dict, text: str, title: str = "Skolfie report") -
     body.append("</section>")
     if result.get("disclaimer"):
         body.append(f'<p class="note">{html.escape(str(result["disclaimer"]))}</p>')
-    return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
-            '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            f"<title>{html.escape(title)}</title><style>{_CSS}</style></head><body>"
-            + "\n".join(body) + "</body></html>\n")
+    return _page(title, body)
 
 
 # --------------------------------------------------------------------------- #
