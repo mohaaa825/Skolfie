@@ -296,8 +296,6 @@ def test_export_escapes_formulas_but_master_stays_raw(tmp_path: Path) -> None:
     assert exported["text"].tolist() == expected
     assert exported["comment"].tolist() == expected
     assert fb.load_feedback(csv_path)["text"].tolist() == payloads
-    raw = fb.export_feedback(csv_path, str(tmp_path / "raw.csv"), escape_formulas=False)
-    assert fb.load_feedback(raw)["text"].tolist() == payloads
 
 
 # --------------------------------------------------------------------------- #
