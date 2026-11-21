@@ -44,9 +44,11 @@ def _frame(texts, ids=None, source="s1", domain="news") -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 def test_registry_metadata() -> None:
     assert list(A.ATTACKS) == ["typo_5", "typo_15", "synonym_15", "homoglyph", "zero_width",
-                               "t5_paraphrase", "llm_paraphrase", "humanizer", "temp_low",
-                               "temp_high", "human_edit_30"]
-    for name in ("typo_5", "synonym_15", "homoglyph", "zero_width"):
+                               "word_typography", "plain_typography", "t5_paraphrase",
+                               "llm_paraphrase", "humanizer", "temp_low", "temp_high",
+                               "human_edit_30"]
+    for name in ("typo_5", "synonym_15", "homoglyph", "zero_width", "word_typography",
+                 "plain_typography"):
         assert A.ATTACKS[name].applies_to == "both"
     for name in ("t5_paraphrase", "llm_paraphrase", "humanizer", "temp_low", "human_edit_30"):
         assert A.ATTACKS[name].applies_to == "ai"
@@ -408,7 +410,7 @@ def test_api_attacks_skip_without_keys(monkeypatch) -> None:
     assert set(skipped) == {"t5_paraphrase", "llm_paraphrase", "humanizer", "temp_low",
                             "temp_high"}
     assert run == ["typo_5", "typo_15", "synonym_15", "homoglyph", "zero_width",
-                   "human_edit_30"]
+                   "word_typography", "plain_typography", "human_edit_30"]
     args = script.build_parser().parse_args(["--provider", "anthropic"])
     assert "ANTHROPIC_API_KEY" in script.make_llm_provider(args)[1]
     # Named explicitly, the T5 attack runs even without a GPU.
@@ -758,3 +760,29 @@ def test_threshold_at_fpr_ignores_nan() -> None:
     assert t > 0.3 and np.isfinite(t)
     assert np.isnan(script.threshold_at_fpr([np.nan], 0.1))
 
+
+
+def test_typography_attacks() -> None:
+    text = 'She said "it\'s fine" -- really. Then (\'ok\') - wait... the 90\'s.'
+    word = A.word_typography(text)
+    assert word == "She said “it’s fine”—really. Then (‘ok’) – wait… the 90’s."
+    assert A.plain_typography(word) == ('She said "it\'s fine" - really. '
+                                        "Then ('ok') - wait... the 90's.")
+    frame = {"id": ["a"], "text": [text], "source": ["x"], "domain": ["y"]}
+    assert A.apply_attack("word_typography", frame, A.AttackContext()) == [word]
+
+
+def test_make_attacks_sources_filter(data) -> None:
+    script = load_script("make_attacks")
+    corpus = pd.read_parquet(data["corpus"])
+    source = sorted(corpus["source"].unique())[0]
+    out = data["root"] / "attacks-sources"
+    assert script.main(_make_argv(data, out, "--n", "5", "--provider", "none",
+                                  "--sources", source, "--attacks", "word_typography")) == 0
+    df = pd.read_parquet(out / "attacks.parquet")
+    assert set(df["source"]) == {source}
+    assert set(df["attack"]) == {"clean", "word_typography"}
+    assert json.loads((out / "attacks_manifest.json").read_text())["sources"] == source
+    with pytest.raises(SystemExit):
+        script.main(_make_argv(data, out, "--provider", "none", "--sources", "nope",
+                               "--attacks", "word_typography"))

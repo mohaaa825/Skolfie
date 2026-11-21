@@ -102,7 +102,7 @@ import numpy as np
 
 from skolfie.eval.metrics import to_binary
 from skolfie.models.feature_model import FeatureModel, scoring_texts
-from skolfie.robust.normalize import normalize_for_scoring
+from skolfie.robust.normalize import CURRENT_NORMALIZER, normalize_for_scoring
 
 FEATURE_HIDDEN = 64
 DROPOUT = 0.1
@@ -310,6 +310,7 @@ class TransformerModel:
         self.log = log
         self.chunk_augment = int(chunk_augment)
         self.chunk_words = int(chunk_words)
+        self.normalizer = CURRENT_NORMALIZER
         self.name = "transformer" if use_features else "transformer-text"
         if self.chunk_augment:
             self.name += "-chunks"
@@ -363,6 +364,7 @@ class TransformerModel:
     def __setstate__(self, state: dict[str, Any]) -> None:
         # Models saved before chunk training existed.
         state.setdefault("chunk_augment", 0)
+        state.setdefault("normalizer", 1)
         state.setdefault("chunk_words", 60)
         state.setdefault("n_chunks_", 0)
         # Models saved before `precision` existed: their fp16 flag decides.
@@ -564,7 +566,7 @@ class TransformerModel:
         return [g for g in groups if g["params"]]
 
     def fit(self, texts: Sequence[str], labels: Sequence[Any]) -> "TransformerModel":
-        texts = scoring_texts(texts)
+        texts = scoring_texts(texts, self.normalizer)
         y = to_binary(labels)
         if len(texts) != len(y):
             raise ValueError("texts and labels must have the same length")
@@ -635,7 +637,7 @@ class TransformerModel:
                 a, b = spans[j]
                 # Cut from the normalised text and normalised again, like a chunk
                 # the Mixed detector cuts from the original text and scores.
-                extra.append(normalize_for_scoring(texts[i][a:b]))
+                extra.append(normalize_for_scoring(texts[i][a:b], self.normalizer))
                 extra_y.append(y[i])
         self.n_chunks_ = len(extra)
         self.log(f"[transformer] chunk training: {len(extra):,} chunks of about "
@@ -754,7 +756,7 @@ class TransformerModel:
     def predict_proba(self, texts: Sequence[str]) -> np.ndarray:
         if self._net is None and self._packed is None:
             raise RuntimeError("TransformerModel is not fitted")
-        texts = scoring_texts(texts)
+        texts = scoring_texts(texts, self.normalizer)
         if not texts:
             return np.zeros(0)
         self._ensure_net()
@@ -770,7 +772,7 @@ class TransformerModel:
         out: dict[str, Any] = {k: getattr(self, k) for k in (
             "model_name", "use_features", "max_length", "epochs", "batch_size", "grad_accum",
             "lr", "head_lr", "weight_decay", "warmup_ratio", "eval_fraction", "seed",
-            "precision", "gradient_checkpointing")}
+            "precision", "gradient_checkpointing", "normalizer")}
         out["backbone"] = self.backbone_type_
         out["precision_used"] = self.precision_used_
         if self.chunk_augment:

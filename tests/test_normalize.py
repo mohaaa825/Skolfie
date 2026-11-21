@@ -217,3 +217,45 @@ def test_app_shows_the_obfuscation_warning() -> None:
     result["warnings"] = [{"kind": "obfuscation", "message": note}]
     page = render_result_html(result, "some text")
     assert "Hidden characters" in page and "The text contains 4 invisible characters" in page
+
+
+# --------------------------------------------------------------------------- #
+# Version 2: typography and anonymisation tags
+# --------------------------------------------------------------------------- #
+def test_version_1_is_the_default_and_keeps_typography() -> None:
+    text = "“Hi” — it’s Generic_Name…"
+    assert normalize_for_scoring(text) == text
+    assert normalize_for_scoring(text, 1) == text
+    with pytest.raises(ValueError):
+        normalize_for_scoring(text, 3)
+
+
+def test_version_2_word_and_plain_typing_give_the_same_text() -> None:
+    plain = 'She said "it\'s fine" -- really. Then (\'ok\') - wait... 1990-2000, well-known.'
+    word = A.word_typography(plain)
+    assert word != plain
+    assert normalize_for_scoring(word, 2) == normalize_for_scoring(plain, 2)
+    assert normalize_for_scoring(plain, 2).isascii()
+
+
+def test_version_2_whitespace_and_dashes() -> None:
+    assert normalize_for_scoring("a—b\n—c  \n  d\n\n\n\ne f", 2) == "a - b\n- c\nd\n\ne f"
+
+
+def test_version_2_replaces_anonymisation_tags_consistently() -> None:
+    text = ("Generic_Name went to Generic_School with STUDENT_NAME. "
+            "Generic_Name liked it; TEACHER_NAME agreed.")
+    out = normalize_for_scoring(text, 2)
+    assert "Generic_" not in out and "_NAME" not in out
+    first, second = out.split(". ")[0].split()[0], out.split(". ")[1].split()[0]
+    assert first == second  # the same tag gets the same name
+    assert "School" in out or "Academy" in out
+    assert normalize_for_scoring(out, 2) == out
+    kept = "snake_case and MAX_VALUE stay"
+    assert normalize_for_scoring(kept, 2) == kept
+
+
+@pytest.mark.parametrize("text", ["“Hi” — Generic_Name…", "plain ascii", "Ｆｕｌｌ ｗｉｄｔｈ — x"])
+def test_version_2_is_idempotent(text: str) -> None:
+    once = normalize_for_scoring(text, 2)
+    assert normalize_for_scoring(once, 2) == once
