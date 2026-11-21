@@ -304,30 +304,21 @@ def merge_near_duplicate_groups(groups: pd.Series, clusters: pd.Series) -> pd.Se
     """Merge every group that holds a member of a near-duplicate cluster with the
     groups of the cluster's other members. A merged group is named by its
     smallest group key, so groups without near duplicates keep their key."""
+    from skolfie.eval.near_dup import _UnionFind
+
     groups = groups.astype(str)
     clusters = np.asarray(clusters, dtype=np.int64)
     codes, uniques = pd.factorize(groups, sort=False)
     has = np.flatnonzero(clusters >= 0)
     if has.size == 0:
         return groups
-    parent = np.arange(len(uniques), dtype=np.int64)
-
-    def find(i: int) -> int:
-        root = i
-        while parent[root] != root:
-            root = parent[root]
-        while parent[i] != root:
-            parent[i], i = root, parent[i]
-        return int(root)
-
+    uf = _UnionFind(len(uniques))
     order = has[np.argsort(clusters[has], kind="stable")]
     c_sorted, g_sorted = clusters[order], codes[order]
     for k in range(1, len(order)):
         if c_sorted[k] == c_sorted[k - 1]:
-            a, b = find(int(g_sorted[k - 1])), find(int(g_sorted[k]))
-            if a != b:
-                parent[b] = a
-    roots = np.fromiter((find(i) for i in range(len(uniques))), np.int64, len(uniques))
+            uf.union(int(g_sorted[k - 1]), int(g_sorted[k]))
+    roots = np.fromiter((uf.find(i) for i in range(len(uniques))), np.int64, len(uniques))
     names = np.asarray(uniques, dtype=object)
     best: dict[int, str] = {}
     for root, name in zip(roots, names):
@@ -748,14 +739,6 @@ def write_splits(
         manifest=manifest,
         summary_markdown=summary_md,
     )
-
-
-def load_splits(path: str | Path) -> pd.DataFrame:
-    """Read splits.parquet (or the directory holding it) as an (id, split) frame."""
-    path = Path(path)
-    if path.is_dir():
-        path = path / "splits.parquet"
-    return pd.read_parquet(path, columns=["id", "split"])
 
 
 def _md_table(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:

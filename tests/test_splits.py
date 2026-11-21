@@ -428,7 +428,7 @@ def test_write_splits(tmp_path: Path, corpus: pd.DataFrame, config: SplitConfig,
     table = pq.read_table(result.parquet_path)
     assert table.column_names == ["id", "split"]
     assert all(str(t) == "string" for t in table.schema.types)
-    back = splits.load_splits(tmp_path / "out")
+    back = pd.read_parquet(result.parquet_path)
     pd.testing.assert_frame_equal(back.astype(object), memberships.astype(object),
                                   check_dtype=False)
 
@@ -488,7 +488,7 @@ def test_cli(tmp_path: Path, corpus: pd.DataFrame, memberships: pd.DataFrame,
     assert "splits.parquet" in printed
     for name in ("splits.parquet", "splits_manifest.json", "splits.md"):
         assert (out_dir / name).is_file()
-    written = splits.load_splits(out_dir)
+    written = pd.read_parquet(out_dir / "splits.parquet")
     assert written["id"].tolist() == memberships["id"].tolist()
     assert written["split"].tolist() == memberships["split"].tolist()
     assert json.loads((out_dir / "splits_manifest.json").read_text())["corpus_version"] == \

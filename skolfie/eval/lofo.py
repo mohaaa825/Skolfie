@@ -51,6 +51,7 @@ import numpy as np
 import pandas as pd
 
 from skolfie.eval.metrics import auroc
+from skolfie.eval.report import _fmt, _pct, _table, run_evaluation
 from skolfie.eval.splits import SplitConfig, assign_splits, make_splits
 
 DEFAULT_FAMILIES = ("claude", "claude-haiku", "gemini")
@@ -200,8 +201,6 @@ def run_family(make_scorer: Callable[[], Any], corpus: pd.DataFrame, base: Split
 
     `corpus` is a `skolfie.eval.report.load_corpus` frame plus `n_words`.
     """
-    from skolfie.eval.report import run_evaluation
-
     t0 = time.time()
     config, memberships = lofo_splits(corpus, base, family)
     counts = split_counts(corpus, memberships, config)
@@ -229,28 +228,18 @@ def run_family(make_scorer: Callable[[], Any], corpus: pd.DataFrame, base: Split
                all_held_out_generators=list(config.held_out_generators),
                seconds=round(time.time() - t0, 1), **counts)
     log(f"[lofo] {family}: recall {_pct(row['recall'])} at cut-off "
-        f"{row['ai_threshold']:.4f}, AUROC {_num(row['auroc_vs_persuade'])}, mean P(ai) "
-        f"{_num(row['mean_p_ai'])}, PERSUADE FPR {_pct(row['persuade_fpr'])}")
+        f"{row['ai_threshold']:.4f}, AUROC {_fmt(row['auroc_vs_persuade'])}, mean P(ai) "
+        f"{_fmt(row['mean_p_ai'])}, PERSUADE FPR {_pct(row['persuade_fpr'])}")
     return row, report, preds
 
 
 # --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
-def _pct(x: Any) -> str:
-    return "n/a" if x is None or (isinstance(x, float) and math.isnan(x)) else f"{100 * x:.1f}%"
-
-
-def _num(x: Any) -> str:
-    return "n/a" if x is None or (isinstance(x, float) and math.isnan(x)) else f"{x:.3f}"
-
-
 def render_lofo_md(result: dict[str, Any]) -> str:
     """Markdown table, one row per held-out family."""
-    from skolfie.eval.report import _table
-
     rows = [[r["family"], ", ".join(r["held_out_generators"]), f"{r['n_family']:,}",
-             _pct(r["recall"]), _num(r["auroc_vs_persuade"]), _num(r["mean_p_ai"]),
+             _pct(r["recall"]), _fmt(r["auroc_vs_persuade"]), _fmt(r["mean_p_ai"]),
              f"{r['n_persuade_human']:,}", _pct(r["persuade_fpr"]), f"{r['ai_threshold']:.4f}"]
             for r in result["families"]]
     lines = [
