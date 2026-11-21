@@ -48,19 +48,10 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
 
-
-def _ensure_repo_on_path() -> None:
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-
-
-def _positive_int(value: str) -> int:
-    n = int(value)
-    if n <= 0:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return n
+from scripts._cli import named_path, positive_int  # noqa: E402
 
 
 def _fraction(value: str) -> float:
@@ -70,22 +61,13 @@ def _fraction(value: str) -> float:
     return x
 
 
-def _model(value: str) -> tuple[str, Path]:
-    name, sep, path = value.partition("=")
-    if not sep:
-        return Path(value).stem, Path(value)
-    if not name or not path:
-        raise argparse.ArgumentTypeError(f"expected [NAME=]PATH, got {value!r}")
-    return name, Path(path)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="eval_robust.py",
         description="Robustness table per attack for one or more saved models.")
     parser.add_argument("--attacks", type=Path, required=True,
                         help="attacks.parquet from make_attacks.py (with the clean rows).")
-    parser.add_argument("--model", type=_model, action="append", required=True,
+    parser.add_argument("--model", type=named_path, action="append", required=True,
                         metavar="[NAME=]PATH",
                         help="A saved model (joblib) with predict_proba(texts); repeat to "
                              "compare models (the first is the reference).")
@@ -95,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fpr-tolerance", type=_fraction, default=0.005,
                         help="Allowed rise of the clean-human FPR at 0.5 over the reference "
                              "model in the roadmap check (default: 0.005).")
-    parser.add_argument("--batch-size", type=_positive_int, default=4096,
+    parser.add_argument("--batch-size", type=positive_int, default=4096,
                         help="Texts per predict_proba call (default: 4096).")
     parser.add_argument("--out-dir", type=Path,
                         help="Default: reports/robust/<model> (or compare-<models>).")
@@ -341,7 +323,6 @@ def render_md(report: dict[str, Any]) -> str:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    _ensure_repo_on_path()
     started = time.time()
 
     names = [n for n, _ in args.model]

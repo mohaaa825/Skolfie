@@ -28,7 +28,6 @@ run's report card and predictions in `<out-dir>/<family>/`.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import sys
 from datetime import datetime, timezone
@@ -36,38 +35,17 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts._cli import comma_list, positive_float, positive_int  # noqa: E402
+from scripts.evaluate import parse_oversample  # noqa: E402
+
 LOFO_MODELS = ("features", "features-nolm", "features-rf", "features-nolm-rf", "transformer",
                "transformer-text")
 
 
-def _ensure_repo_on_path() -> None:
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-
-
-def _evaluate_script() -> Any:
-    """scripts/evaluate.py as a module (for its option parsers)."""
-    name = "skolfie_scripts_evaluate"
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("evaluate.py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-def _list(values: Sequence[str]) -> list[str]:
-    out: list[str] = []
-    for value in values:
-        out += [s for s in (v.strip() for v in value.split(",")) if s and s not in out]
-    return out
-
-
 def build_parser() -> argparse.ArgumentParser:
-    ev = _evaluate_script()
     parser = argparse.ArgumentParser(
         prog="eval_lofo.py",
         description="Leave-one-family-out: hold out each AI model family in turn, retrain, and "
@@ -90,28 +68,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-fpr", type=float, default=0.01,
                         help="Human FPR on val that sets the cut-off (default: 0.01).")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--max-train", type=ev._positive_int)
-    parser.add_argument("--max-eval", type=ev._positive_int,
+    parser.add_argument("--max-train", type=positive_int)
+    parser.add_argument("--max-eval", type=positive_int,
                         help="Cap on the val texts scored per run (sets the cut-off).")
     parser.add_argument("--oversample", action="append", default=[], metavar="SOURCE=N")
     parser.add_argument("--keep-sources", action="append", default=[], metavar="SOURCES")
     group = parser.add_argument_group("model options (as in evaluate.py)")
     group.add_argument("--cache-dir", type=Path)
     group.add_argument("--lm-model")
-    group.add_argument("--lm-batch-size", type=ev._positive_int)
+    group.add_argument("--lm-batch-size", type=positive_int)
     group.add_argument("--lm-device")
     group.add_argument("--n-jobs", type=int)
     group.add_argument("--bino-observer")
     group.add_argument("--bino-performer")
-    group.add_argument("--bino-max-tokens", type=ev._positive_int)
-    group.add_argument("--bino-batch-size", type=ev._positive_int)
+    group.add_argument("--bino-max-tokens", type=positive_int)
+    group.add_argument("--bino-batch-size", type=positive_int)
     group.add_argument("--bino-quantization", choices=("4bit", "8bit"))
     group.add_argument("--backbone", "--hf-model", dest="hf_model")
-    group.add_argument("--max-length", type=ev._positive_int)
-    group.add_argument("--epochs", type=ev._positive_int)
-    group.add_argument("--batch-size", type=ev._positive_int)
-    group.add_argument("--grad-accum", type=ev._positive_int)
-    group.add_argument("--lr", type=ev._positive_float)
+    group.add_argument("--max-length", type=positive_int)
+    group.add_argument("--epochs", type=positive_int)
+    group.add_argument("--batch-size", type=positive_int)
+    group.add_argument("--grad-accum", type=positive_int)
+    group.add_argument("--lr", type=positive_float)
     group.add_argument("--precision", choices=("auto", "fp16", "bf16", "fp32"))
     group.add_argument("--gradient-checkpointing", action="store_true", default=None)
     return parser
@@ -139,8 +117,6 @@ def load_lofo_corpus(path: Path) -> Any:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    _ensure_repo_on_path()
-    ev = _evaluate_script()
 
     from skolfie.eval import lofo
     from skolfie.eval.report import _json_safe, atomic_path, git_info, write_report
@@ -154,12 +130,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.bino_observer and not args.model.startswith("features"):
         parser.error("--bino-observer is for the feature models only")
     try:
-        oversample = ev.parse_oversample(args.oversample)
+        oversample = parse_oversample(args.oversample)
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
-    keep_sources = ev.parse_keep_sources(args.keep_sources)
+    keep_sources = comma_list(args.keep_sources)
     families = [] if args.no_default_families else list(lofo.DEFAULT_FAMILIES)
-    families += [f for f in _list(args.families) if f not in families]
+    families += [f for f in comma_list(args.families) if f not in families]
     if not families:
         parser.error("no families to hold out (--no-default-families without --families)")
 

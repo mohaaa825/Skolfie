@@ -571,7 +571,7 @@ def test_run_evaluation_keeps_sources_in_train_and_eval() -> None:
 
 def test_evaluate_cli_keep_sources(tmp_path: Path, capsys) -> None:
     evaluate = _script("evaluate")
-    assert evaluate.parse_keep_sources(["fresh, persuade", "fresh", "x,"]) == [
+    assert evaluate.comma_list(["fresh, persuade", "fresh", "x,"]) == [
         "fresh", "persuade", "x"]
     df = _keep_frame(n_old=60)
     corpus = df.assign(id=df.index, generator="g", domain="academic", subdomain="s",

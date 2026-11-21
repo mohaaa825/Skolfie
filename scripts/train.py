@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
 DEFAULT_MODEL_PATH = Path("models") / "detector_model.joblib"
 
 _LABEL_ALIASES = {
@@ -41,13 +43,6 @@ _LABEL_ALIASES = {
     "ai-generated": "ai",
     "ai generated": "ai",
 }
-
-
-def _ensure_repo_on_path() -> None:
-    """Allow `python scripts/train.py` from a checkout without installing."""
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
 
 
 def normalize_label(value: object) -> Optional[str]:
@@ -142,7 +137,6 @@ def drop_duplicate_texts(texts: Sequence[str], labels: Sequence[str]
 
 def load_seed_demo() -> Tuple[List[str], List[str]]:
     """The 25 + 25 synthetic texts from the test fixtures (smoke runs only)."""
-    _ensure_repo_on_path()
     from tests.fixtures.seed_texts import AI_TEXTS, HUMAN_TEXTS
 
     texts = list(HUMAN_TEXTS) + list(AI_TEXTS)
@@ -218,7 +212,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.out.is_dir():
         parser.error(f"--out must be a file path, not a directory: {args.out}")
 
-    _ensure_repo_on_path()
 
     texts: List[str] = []
     labels: List[str] = []
