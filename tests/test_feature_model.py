@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from skolfie.features.cache import FeatureCache, text_key
-from skolfie.features.delta_features import DELTA_FEATURES, FEATURE_DESCRIPTIONS, DeltaFeaturizer
+from skolfie.features.delta_features import DELTA_FEATURES, DeltaFeaturizer
 from tests.test_evaluate import make_corpus
 
 pytest.importorskip("sklearn")
@@ -28,10 +28,6 @@ def corpus():
 # --------------------------------------------------------------------------- #
 # Delta features
 # --------------------------------------------------------------------------- #
-def test_delta_names_described() -> None:
-    assert set(DELTA_FEATURES) == set(FEATURE_DESCRIPTIONS)
-
-
 def test_delta_separates_classes(corpus) -> None:
     texts, labels = corpus["text"].tolist(), corpus["label"].tolist()
     delta = DeltaFeaturizer(n_words=50).fit(texts, labels)

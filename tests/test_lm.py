@@ -18,7 +18,6 @@ transformers = pytest.importorskip("transformers")
 tokenizers = pytest.importorskip("tokenizers")
 
 from skolfie.features.lm import (  # noqa: E402
-    FEATURE_DESCRIPTIONS,
     LM_FEATURES,
     LMFeaturizer,
     _token_stats,
@@ -86,11 +85,9 @@ def col(name: str) -> int:
     return LM_FEATURES.index(name)
 
 
-def test_feature_names_prefixed_unique_and_described():
+def test_feature_names_prefixed_and_unique():
     assert len(LM_FEATURES) == len(set(LM_FEATURES))
     assert all(name.startswith("lm_") for name in LM_FEATURES)
-    assert set(FEATURE_DESCRIPTIONS) == set(LM_FEATURES)
-    assert all(isinstance(d, str) and d.strip() for d in FEATURE_DESCRIPTIONS.values())
 
 
 def test_cache_key():

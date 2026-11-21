@@ -56,13 +56,18 @@ for quantization) are imported lazily, so importing this module is cheap.
 from __future__ import annotations
 
 import math
-import re
 import time
 from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 
-from skolfie.features.lm import _MAX_CHARS_PER_TOKEN, _clean_text
+from skolfie.features.lm import (
+    _MAX_CHARS_PER_TOKEN,
+    _clean_text,
+    _padded_batch,
+    _slug,
+    _text_token_limit,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     import torch
@@ -74,20 +79,6 @@ BINO_FEATURES: tuple[str, ...] = (
     "bino_perf_log_ppl",
     "bino_obs_nll_std",
 )
-
-BINO_DESCRIPTIONS: dict[str, str] = {
-    "bino_obs_log_ppl": "Average surprise per token of a modern language model (the observer's "
-    "log-perplexity); AI text is usually less surprising.",
-    "bino_x_ppl": "How surprised a chat-tuned model is by a base model's guesses for each "
-    "next word (cross-perplexity); it measures how predictable the text's context makes any "
-    "continuation.",
-    "bino_score": "Binoculars score: the chat model's surprise divided by the cross-perplexity. "
-    "Low values are typical of AI text, even for prompts that make any answer predictable.",
-    "bino_perf_log_ppl": "Average surprise per token of the chat-tuned (performer) model; "
-    "AI text is usually very predictable to a chat model.",
-    "bino_obs_nll_std": "How much the observer model's per-token surprise varies across the "
-    "text (burstiness); human writing is usually burstier.",
-}
 
 QUANTIZATIONS = ("4bit", "8bit")
 
@@ -144,10 +135,6 @@ def _aggregate(obs_nll: np.ndarray, cross: np.ndarray | None,
         row[_IDX["bino_score"]] = perf_log_ppl / x_ppl if x_ppl > 0 else np.nan
         row[_IDX["bino_perf_log_ppl"]] = perf_log_ppl
     return row
-
-
-def _slug(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "lm"
 
 
 class BinocularsFeaturizer:
@@ -313,9 +300,7 @@ class BinocularsFeaturizer:
         pad = getattr(tok, "pad_token_id", None)
         self._pad_id = int(pad) if pad is not None else self._bos_id
 
-        cfg = self.observer_model.config
-        n_pos = getattr(cfg, "n_positions", None) or getattr(cfg, "max_position_embeddings", None)
-        self._n_text = min(self.max_tokens, int(n_pos) - 1) if n_pos else self.max_tokens
+        self._n_text = _text_token_limit(self.observer_model.config, self.max_tokens)
         self._ready = True
 
     def _check_tokenizers(self) -> None:
@@ -357,13 +342,7 @@ class BinocularsFeaturizer:
         import torch
 
         lengths = [len(x) for x in batch]
-        seq_len = max(lengths) + 1
-        ids = np.full((len(batch), seq_len), self._pad_id, dtype=np.int64)
-        mask = np.zeros((len(batch), seq_len), dtype=np.int64)
-        for i, x in enumerate(batch):
-            ids[i, 0] = self._bos_id
-            ids[i, 1 : len(x) + 1] = x
-            mask[i, : len(x) + 1] = 1
+        ids, mask = _padded_batch(batch, self._bos_id, self._pad_id)
         input_ids = torch.from_numpy(ids).to(self.device)
         attn = torch.from_numpy(mask).to(self.device)
 

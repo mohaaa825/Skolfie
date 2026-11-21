@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from skolfie.features.style import (
-    FEATURE_DESCRIPTIONS,
     STYLE_FEATURES,
     style_features,
     style_matrix,
@@ -57,13 +56,6 @@ def test_names_unique_and_prefixed():
     assert len(STYLE_FEATURES) == len(set(STYLE_FEATURES))
     assert all(name.startswith("sty_") for name in STYLE_FEATURES)
     assert 35 <= len(STYLE_FEATURES) <= 42
-
-
-def test_descriptions_for_every_feature():
-    assert set(FEATURE_DESCRIPTIONS) == set(STYLE_FEATURES)
-    for name, desc in FEATURE_DESCRIPTIONS.items():
-        assert isinstance(desc, str) and desc.strip(), name
-        assert desc.rstrip().endswith("."), name
 
 
 def test_no_raw_length_features():

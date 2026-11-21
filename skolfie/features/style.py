@@ -3,7 +3,7 @@ skolfie/features/style.py
 -------------------------
 A compact, fast and explainable set of StyloAI-style stylometric features
 for the AI-vs-human LightGBM classifier. It replaces the 128-feature
-`stylometric.py` extractor for modelling (that module stays for the app).
+`stylometric.py` extractor (which only the legacy ensemble still uses).
 
 Design rules:
     * Pure Python regexes and word lists plus numpy: no NLTK, no spaCy, no
@@ -37,8 +37,8 @@ auxiliary, "don't" -> "do" plus a negation).
 
 Use `style_features(text)` for one text (float64 vector ordered like
 `STYLE_FEATURES`) and `style_matrix(texts, n_jobs=...)` for a corpus
-(float32 matrix). `FEATURE_DESCRIPTIONS` holds one plain-English sentence
-per feature for user-facing explanations.
+(float32 matrix). The plain-language wording for each feature lives in
+`skolfie.explain.reasons`.
 """
 
 from __future__ import annotations
@@ -51,67 +51,27 @@ from typing import Sequence
 import numpy as np
 
 # --------------------------------------------------------------------------
-# Feature names and descriptions (the order here is the vector order)
+# Feature names (the order here is the vector order)
 # --------------------------------------------------------------------------
-_FEATURES: tuple[tuple[str, str], ...] = (
+STYLE_FEATURES: tuple[str, ...] = (
     # 1. Lexical
-    ("sty_word_len_mean", "Average word length in letters."),
-    ("sty_word_len_std", "Standard deviation of word length in letters."),
-    ("sty_long_word_share", "Share of words with 7 or more letters."),
-    ("sty_mattr50", "Share of distinct words in a sliding 50-word window, averaged "
-                    "(moving-average type/token ratio)."),
-    ("sty_hapax50", "Share of words that occur only once within a 50-word window, averaged "
-                    "over all windows."),
-    ("sty_yule_k", "Yule's K vocabulary repetitiveness (higher means a narrower, more "
-                   "repetitive vocabulary)."),
-    ("sty_flesch", "Flesch reading ease score (higher means easier to read)."),
+    "sty_word_len_mean", "sty_word_len_std", "sty_long_word_share", "sty_mattr50", "sty_hapax50",
+    "sty_yule_k", "sty_flesch",
     # 2. Word classes
-    ("sty_function_word_share", "Share of words that are function words (the, of, and, it...)."),
-    ("sty_pron_1st", "First-person pronouns (I, me, we, our...) per 100 words."),
-    ("sty_pron_2nd", "Second-person pronouns (you, your...) per 100 words."),
-    ("sty_pron_3rd", "Third-person pronouns (he, she, it, they...) per 100 words."),
-    ("sty_determiners", "Articles and determiners (the, a, this, each...) per 100 words."),
-    ("sty_coord_conj", "Coordinating conjunctions (and, but, or, so...) per 100 words."),
-    ("sty_prepositions", "Prepositions (of, in, with, through...) per 100 words."),
-    ("sty_aux_modals", "Auxiliary and modal verbs (is, have, can, should...) per 100 words."),
-    ("sty_negations", "Negations (not, never, no, n't...) per 100 words."),
-    ("sty_hedges", "Hedging words (perhaps, maybe, likely, seems...) per 100 words."),
-    ("sty_discourse_markers", "Formal discourse markers (however, moreover, overall, "
-                              "\"it is important to note\"...) per 100 words."),
-    ("sty_informal", "Intensifiers and informal words (really, very, lol, gonna...) "
-                     "per 100 words."),
-    ("sty_contractions", "Contractions (don't, it's, I'm...) per 100 words."),
+    "sty_function_word_share", "sty_pron_1st", "sty_pron_2nd", "sty_pron_3rd", "sty_determiners",
+    "sty_coord_conj", "sty_prepositions", "sty_aux_modals", "sty_negations", "sty_hedges",
+    "sty_discourse_markers", "sty_informal", "sty_contractions",
     # 3. Sentences
-    ("sty_sent_len_mean", "Average sentence length in words."),
-    ("sty_sent_len_cv", "Variation of sentence length (standard deviation divided by mean); "
-                        "low values mean uniform sentences."),
-    ("sty_short_sent_share", "Share of sentences with fewer than 8 words."),
-    ("sty_long_sent_share", "Share of sentences with more than 30 words."),
-    ("sty_sent_start_diversity", "Share of distinct sentence-opening words within windows of "
-                                 "10 sentences."),
-    ("sty_sent_cap_share", "Share of sentences that start with a capital letter."),
+    "sty_sent_len_mean", "sty_sent_len_cv", "sty_short_sent_share", "sty_long_sent_share",
+    "sty_sent_start_diversity", "sty_sent_cap_share",
     # 4. Punctuation
-    ("sty_commas", "Commas per 100 words."),
-    ("sty_semicolons", "Semicolons per 100 words."),
-    ("sty_colons", "Colons per 100 words."),
-    ("sty_exclamations", "Exclamation marks per 100 words."),
-    ("sty_questions", "Question marks per 100 words."),
-    ("sty_quotes", "Quotation marks (double and single) per 100 words."),
-    ("sty_parentheses", "Parentheses per 100 words."),
-    ("sty_dashes", "Dashes (en dash, em dash, double or spaced hyphen) per 100 words."),
-    ("sty_ellipses", "Ellipses (... or the ellipsis character) per 100 words."),
+    "sty_commas", "sty_semicolons", "sty_colons", "sty_exclamations", "sty_questions", "sty_quotes",
+    "sty_parentheses", "sty_dashes", "sty_ellipses",
     # 5. Characters
-    ("sty_digit_share", "Share of non-space characters that are digits."),
-    ("sty_upper_share", "Share of letters that are uppercase."),
-    ("sty_allcaps_words", "Fully capitalised words of 2 or more letters per 100 words."),
-    ("sty_non_ascii_share", "Share of non-space characters outside plain ASCII."),
+    "sty_digit_share", "sty_upper_share", "sty_allcaps_words", "sty_non_ascii_share",
     # 6. Repetition
-    ("sty_bigram_repeat", "Share of word pairs that repeat within a 100-word window."),
-    ("sty_trigram_repeat", "Share of three-word sequences that repeat within a 100-word window."),
+    "sty_bigram_repeat", "sty_trigram_repeat",
 )
-
-STYLE_FEATURES: tuple[str, ...] = tuple(name for name, _ in _FEATURES)
-FEATURE_DESCRIPTIONS: dict[str, str] = dict(_FEATURES)
 _D = len(STYLE_FEATURES)
 
 # --------------------------------------------------------------------------
