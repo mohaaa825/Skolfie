@@ -335,7 +335,10 @@ def test_missing_optional_files(tmp_path: Path) -> None:
     assert det.explainer.chunk_scorer is det.explainer.verdict_model._member("transformer").obj
     human, ai, mixed = det.check_many([HUMAN_ESSAY, AI_ESSAY, MIXED_ESSAY])
     assert mixed["label"] != "mixed" and mixed["chunks"]  # heatmap, but no Mixed
-    assert "fairness" not in kinds(ai)
+    # No fairness measurement: every AI / Mixed verdict still gets the English-learner warning.
+    fair = [w["message"] for w in ai["warnings"] if w["kind"] == "fairness"]
+    assert fair == ([service.FALLBACK_FAIRNESS_MESSAGE] if ai["label"] in ("ai", "mixed") else [])
+    assert "fairness" not in kinds(human)
     assert all(f["typical_ai"] is None for f in ai["top_features"])  # no reference values
 
 

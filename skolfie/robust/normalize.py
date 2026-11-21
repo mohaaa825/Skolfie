@@ -52,6 +52,7 @@ from __future__ import annotations
 import bisect
 import re
 import unicodedata
+import zlib
 from functools import lru_cache
 from typing import Any
 
@@ -256,16 +257,25 @@ _BLANK_LINES_RE = re.compile(r"\n{3,}")
 # ("Generic_Name", "Generic_School", "PROPER_NAME", "STUDENT_NAME"). Students
 # never type them, so in training they only say "this is a human corpus essay".
 _PLACEHOLDER_RE = re.compile(r"\b(?:Generic_?[A-Z][A-Za-z]*|[A-Z]{2,}(?:_[A-Z]+)*_NAME)\b")
+_CITIES = ("Springfield", "Fairview", "Greenville", "Madison", "Riverton", "Clayton",
+           "Ashford", "Lakewood")
 _PLACEHOLDER_FILL = {
     "school": ("Lincoln High School", "Oak Ridge Middle School", "Westfield School",
-               "Riverside Academy"),
-    "city": ("Springfield", "Fairview", "Greenville", "Madison"),
-    "place": ("Springfield", "Fairview", "Greenville", "Madison"),
-    "location": ("Springfield", "Fairview", "Greenville", "Madison"),
-    "teacher": ("Mr. Johnson", "Ms. Garcia", "Mrs. Patel", "Mr. Okafor"),
+               "Riverside Academy", "Jefferson High", "Maple Grove School", "Central High",
+               "Hillside Middle School"),
+    "city": _CITIES,
+    "place": _CITIES,
+    "location": _CITIES,
+    "teacher": ("Mr. Johnson", "Ms. Garcia", "Mrs. Patel", "Mr. Okafor", "Ms. Nguyen",
+                "Mr. Schmidt", "Mrs. Rossi", "Ms. Brown"),
 }
-_PLACEHOLDER_NAMES = ("Emma", "Liam", "Sofia", "Noah", "Aisha", "Lucas", "Maya", "Omar",
-                      "Chloe", "Daniel", "Lena", "Mateo")
+# A wide pool, so that no single replacement name becomes a "human essay" cue.
+_PLACEHOLDER_NAMES = (
+    "Emma", "Liam", "Sofia", "Noah", "Aisha", "Lucas", "Maya", "Omar", "Chloe", "Daniel",
+    "Lena", "Mateo", "Grace", "Ethan", "Zara", "Jamal", "Olivia", "Ben", "Priya", "Marcus",
+    "Hannah", "Diego", "Fatima", "Ryan", "Isabel", "Kofi", "Ava", "Samuel", "Leila", "Tyler",
+    "Nora", "Hassan", "Julia", "Andre", "Mia", "Kevin", "Elena", "Jacob", "Amara", "Luke",
+    "Rosa", "Yusuf", "Claire", "Mason", "Ingrid", "Tariq", "Lily", "David", "Sara", "Felix")
 
 
 def _fill(tag: str, k: int) -> str:
@@ -281,7 +291,7 @@ def _replace_placeholders(text: str) -> str:
     if "_" not in text:
         return text
     seen: dict[str, str] = {}
-    base = sum(map(ord, text[:64]))
+    base = zlib.crc32(text[:200].encode("utf-8"))
 
     def sub(m: re.Match[str]) -> str:
         tag = m.group()

@@ -123,6 +123,13 @@ before again further once here up down out off above below during until against
 """.split())
 LANGUAGE_MIN_SHARE = 0.10
 LANGUAGE_MIN_TOKENS = 20
+# Shown with every AI / Mixed verdict when the reports have no fairness
+# measurement for these models (no known_limitations.json): English learners
+# were flagged far more often by earlier models (TOEFL essays ~25%).
+FALLBACK_FAIRNESS_MESSAGE = (
+    "English learners' essays have been wrongly flagged as AI much more often than other "
+    "essays, and this has not been measured for the current models. Do not act on this "
+    "verdict alone: talk to the student and look at other evidence first.")
 LANGUAGE_MESSAGE = ("This text does not look like English. Skolfie is trained on English text "
                     "only, so this result is not reliable.")
 
@@ -543,8 +550,9 @@ class Detector:
         if note:
             warnings.append(_warning("obfuscation", note))
         if label in ("ai", "mixed"):
-            warnings += [_warning("fairness", item["message"])
-                         for item in self.known_limitations]
+            warnings += ([_warning("fairness", item["message"])
+                          for item in self.known_limitations]
+                         or [_warning("fairness", FALLBACK_FAIRNESS_MESSAGE)])
         if looks_non_english(text):
             warnings.append(_warning("language", LANGUAGE_MESSAGE))
         disagreement = disagreement_note(ex)

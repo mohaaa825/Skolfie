@@ -151,7 +151,7 @@
                     <li><span>Omar K.</span><span class="rows__t">The Great Gatsby</span><span class="tag tag--human">Human</span></li>
                     <li><span>Ella S.</span><span class="rows__t">Lab report</span><span class="tag tag--human">Human</span></li>
                     <li><span>Noah B.</span><span class="rows__t">Social media</span><span class="tag tag--ai">AI</span></li>
-                    <li><span>Sara A.</span><span class="rows__t">School uniforms</span><span class="tag tag--unsure">Uncertain</span></li>
+                    <li><span>Sara A.</span><span class="rows__t">School uniforms</span><span class="tag tag--unsure">Too short</span></li>
                     <li><span>Liam P.</span><span class="rows__t">Book review</span><span class="tag tag--human">Human</span></li>
                   </ul>
                   <p class="rows__more">+ 22 more</p>
@@ -162,8 +162,8 @@
             <!-- 8. Accuracy -->
             <div class="scene scene--card" data-scene="stat">
               <div class="card-big">
-                <p class="card-big__value">1 in 585</p>
-                <p class="card-big__label">real student essays wrongly flagged in our Nov 2026 test (0.17%)</p>
+                <p class="card-big__value">Careful</p>
+                <p class="card-big__label">Built to rarely flag honest work. New test results, with error margins, are coming.</p>
               </div>
             </div>
 
@@ -217,11 +217,11 @@
       <div class="wrap">
         <h2 id="numbers-title" class="sr">Test results</h2>
         <div class="numbers__grid">
-          <div class="stat" data-reveal><p class="stat__value"><span data-count="97">97</span>–100%</p><p class="stat__label">of AI essays caught from the newest Claude and Gemini</p></div>
-          <div class="stat" data-reveal><p class="stat__value"><span data-count="99.6" data-decimals="1">99.6</span>%</p><p class="stat__label">caught from an AI model never seen in training</p></div>
-          <div class="stat" data-reveal><p class="stat__value">1 in <span data-count="585">585</span></p><p class="stat__label">real student essays wrongly flagged (0.17%)</p></div>
+          <div class="stat" data-reveal><p class="stat__value">Re-testing</p><p class="stat__label">An independent review in Nov 2026 found our test set was easier than a real classroom, so we have taken our old numbers down.</p></div>
+          <div class="stat" data-reveal><p class="stat__value">Real essays</p><p class="stat__label">The new tests use real student writing, AI models from several companies, and essays typed in Word.</p></div>
+          <div class="stat" data-reveal><p class="stat__value">Error margins</p><p class="stat__label">We will publish detection and false-alarm rates with their error margins, including for English learners.</p></div>
         </div>
-        <p class="fine">Held-out test set, Nov 2026. Results on your own students may differ (<a href="#responsible">responsible use</a>).</p>
+        <p class="fine">Until then, treat every verdict as a reason to talk with the student, not as proof (<a href="#responsible">responsible use</a>).</p>
       </div>
     </section>
 
@@ -282,7 +282,7 @@
               <svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>
             </div>
             <h3>Careful by default</h3>
-            <p>Very few honest essays flagged. Says so when unsure.</p>
+            <p>Tuned to rarely flag honest work. Warns when a text is too short to judge.</p>
           </article>
           <article class="card" data-reveal>
             <div class="icon icon--blue" aria-hidden="true">
@@ -352,8 +352,8 @@
         <h2 id="privacy-title" data-reveal>Student texts stay private.</h2>
         <p class="sub" data-reveal>Built with GDPR in mind.</p>
         <ul class="list">
-          <li data-reveal><strong>No third-party AI.</strong> Essays are checked by Skolfie's own models and are never sent to OpenAI, Google, Anthropic or any other AI provider.</li>
-          <li data-reveal><strong>EU hosting.</strong> Skolfie is moving to servers in the EU, so student texts don't leave Europe.</li>
+          <li data-reveal><strong>No third-party AI.</strong> Essays are checked by Skolfie's own models, not by ChatGPT, Gemini, Claude or any other AI service.</li>
+          <li data-reveal><strong>EU hosting before schools use it.</strong> Today's test version runs on Google Colab. Before any school uses Skolfie with real students, it moves to our own servers in the EU, so student texts don't leave Europe.</li>
           <li data-reveal><strong>A data processing agreement with every school.</strong> We sign a DPA (personuppgiftsbiträdesavtal) with each school before it starts.</li>
         </ul>
       </div>
