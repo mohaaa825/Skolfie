@@ -93,6 +93,17 @@ def test_motion_respects_reduced_motion():
     assert "prefers-reduced-motion: reduce" in html_text
 
 
+def test_checker_buttons_ask_for_access_until_the_app_is_public():
+    html_text = (SITE / "index.html").read_text(encoding="utf-8")
+    # js-app-strict buttons are hidden by main.js until appUrl is set, so they keep their live label.
+    app_links = [label for classes, label in re.findall(r'<a [^>]*class="([^"]*)"[^>]*>([^<]*)</a>', html_text)
+                 if "js-app" in classes.split() and "js-app-strict" not in classes.split()]
+    assert app_links, "expected checker buttons"
+    assert all(label == "Request access" for label in app_links), app_links
+    assert "data-live-label" in html_text
+    assert 'class="draft-tag"' not in html_text
+
+
 def test_nav_and_footer_use_skolfie_logo():
     html_text = (SITE / "index.html").read_text(encoding="utf-8")
     nav = html_text.split('<header class="nav"', 1)[1].split("</header>", 1)[0]
