@@ -21,6 +21,7 @@ from skolfie.data.generation.providers import FakeProvider, ProviderError
 from skolfie.mixed.chunking import split_sentences
 from skolfie.models.baselines import LengthBaseline, TfidfLRBaseline
 from skolfie.robust import attacks as A
+from skolfie.robust.normalize import normalize_for_scoring
 from tests.test_evaluate import make_corpus, make_splits
 from tests.test_stacker import _load_script
 
@@ -177,7 +178,7 @@ def test_unicode_attacks_change_bytes_but_look_the_same() -> None:
     for fn in (A.homoglyph_text, A.zero_width_text):
         new = fn(TEXT, 0.3, A.text_rng(0, fn.__name__, TEXT))
         assert new != TEXT and new.encode() != TEXT.encode()
-        assert A.undo_unicode_tricks(new) == TEXT
+        assert normalize_for_scoring(new) == TEXT
         assert fn(TEXT, 0.0, A.text_rng(0, "x", TEXT)) == TEXT
     glyph = A.homoglyph_text(TEXT, 1.0, A.text_rng(0, "h", TEXT))
     assert len(glyph) == len(TEXT) and not glyph.isascii()

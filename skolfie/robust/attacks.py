@@ -411,12 +411,6 @@ def zero_width_text(text: str, rate: float, rng: random.Random) -> str:
     return _replace_spans(text, edits)
 
 
-def undo_unicode_tricks(text: str) -> str:
-    """Remove zero-width spaces and map the homoglyphs above back to Latin."""
-    back = {v: k for k, v in HOMOGLYPHS.items()}
-    return "".join(back.get(c, c) for c in text.replace(ZERO_WIDTH, ""))
-
-
 # --------------------------------------------------------------------------- #
 # Human-edit splice
 # --------------------------------------------------------------------------- #
