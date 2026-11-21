@@ -34,12 +34,10 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
 
-
-def _ensure_repo_on_path() -> None:
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
+from scripts._cli import open_share  # noqa: E402
 
 
 def _name_path(value: str) -> tuple[str, Path]:
@@ -47,13 +45,6 @@ def _name_path(value: str) -> tuple[str, Path]:
     if not sep or not name or not path:
         raise argparse.ArgumentTypeError(f"expected NAME=PATH, got {value!r}")
     return name, Path(path)
-
-
-def _fraction(value: str) -> float:
-    x = float(value)
-    if not 0 < x < 1:
-        raise argparse.ArgumentTypeError("must be between 0 and 1")
-    return x
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,10 +60,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fit-split", default="val",
                         help="Split to fit the stacker and cut-offs on (default: val).")
     parser.add_argument("--calibration", choices=("platt", "isotonic"), default="platt")
-    parser.add_argument("--max-fpr", type=_fraction, default=0.01,
+    parser.add_argument("--max-fpr", type=open_share, default=0.01,
                         help="Share of human texts (on the fit split) allowed above the AI "
                              "cut-off (default: 0.01).")
-    parser.add_argument("--max-miss", type=_fraction, default=0.05,
+    parser.add_argument("--max-miss", type=open_share, default=0.05,
                         help="Share of AI texts (on the fit split) allowed below the human "
                              "cut-off (default: 0.05).")
     parser.add_argument("--out-dir", type=Path, default=Path("reports") / "stacked")
@@ -132,7 +123,6 @@ def load_member(path: Path) -> Any:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    _ensure_repo_on_path()
 
     import pandas as pd
 

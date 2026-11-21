@@ -56,43 +56,15 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts._cli import named_path, non_negative_int, open_share, positive_int, share  # noqa: E402
+from skolfie.eval.report import _pct, _table  # noqa: E402
+
 DEFAULT_EVAL_SPLITS = "test,test_ood_domain"
 # build_fairness_sets.py writes fairness_manifest.json; the others are fallbacks.
 MANIFEST_NAMES = ("fairness_manifest.json", "{stem}_manifest.json", "manifest.json")
-
-
-def _ensure_repo_on_path() -> None:
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-
-
-def _positive_int(value: str) -> int:
-    n = int(value)
-    if n <= 0:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return n
-
-
-def _non_negative_int(value: str) -> int:
-    n = int(value)
-    if n < 0:
-        raise argparse.ArgumentTypeError("must be 0 or more")
-    return n
-
-
-def _open_fraction(value: str) -> float:
-    x = float(value)
-    if not 0 < x < 1:
-        raise argparse.ArgumentTypeError("must be between 0 and 1 (exclusive)")
-    return x
-
-
-def _probability(value: str) -> float:
-    x = float(value)
-    if not 0 <= x <= 1:
-        raise argparse.ArgumentTypeError("must be between 0 and 1")
-    return x
 
 
 def _at_least_one(value: str) -> float:
@@ -100,15 +72,6 @@ def _at_least_one(value: str) -> float:
     if x < 1:
         raise argparse.ArgumentTypeError("must be 1 or more")
     return x
-
-
-def _model(value: str) -> tuple[str, Path]:
-    name, sep, path = value.partition("=")
-    if not sep:
-        return Path(value).stem, Path(value)
-    if not name or not path:
-        raise argparse.ArgumentTypeError(f"expected [NAME=]PATH, got {value!r}")
-    return name, Path(path)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -121,44 +84,44 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fairness-sets", type=Path,
                         help="fairness_sets.parquet from build_fairness_sets.py (optional; "
                              "without it the external sets are skipped with a note).")
-    parser.add_argument("--model", type=_model, action="append", required=True,
+    parser.add_argument("--model", type=named_path, action="append", required=True,
                         metavar="[NAME=]PATH",
                         help="A saved model (joblib) with predict_proba(texts); repeat to "
                              "compare models (known_limitations.json is for the first).")
-    parser.add_argument("--threshold", type=_probability,
+    parser.add_argument("--threshold", type=share,
                         help="Flag texts with P(ai) above this, for every model (default: the "
                              "model's cutoffs['ai_threshold'], else the --max-fpr cut-off on "
                              "--threshold-split).")
-    parser.add_argument("--max-fpr", type=_open_fraction, default=0.01,
+    parser.add_argument("--max-fpr", type=open_share, default=0.01,
                         help="Human FPR on --threshold-split that sets the threshold of a "
                              "model without cut-offs (default: 0.01).")
     parser.add_argument("--threshold-split", default="val",
                         help="Split whose human texts set that threshold (default: val).")
-    parser.add_argument("--max-val", type=_positive_int,
+    parser.add_argument("--max-val", type=positive_int,
                         help="At most this many human texts of --threshold-split (default: all).")
     parser.add_argument("--eval-splits", default=DEFAULT_EVAL_SPLITS,
                         help=f"Comma-separated corpus splits whose human texts are measured "
                              f"(default: {DEFAULT_EVAL_SPLITS}).")
-    parser.add_argument("--max-per-group", type=_positive_int,
+    parser.add_argument("--max-per-group", type=positive_int,
                         help="Cap per stratum, for speed: corpus human texts per domain x "
                              "length bucket, fairness-set texts per set (x proficiency band); "
                              "default: no cap.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--min-ratio", type=_at_least_one, default=2.0,
                         help="Flag rule: FPR at least this many times the reference (default: 2).")
-    parser.add_argument("--min-excess", type=_probability, default=0.02,
+    parser.add_argument("--min-excess", type=share, default=0.02,
                         help="Flag rule: FPR at least this far above the reference "
                              "(default: 0.02, i.e. 2 pp).")
-    parser.add_argument("--min-n", type=_positive_int, default=30,
+    parser.add_argument("--min-n", type=positive_int, default=30,
                         help="Groups with fewer texts are too small to judge (default: 30).")
     parser.add_argument("--features-model", type=Path,
                         help="Feature model (features.joblib) for the feature medians; default: "
                              "the one inside each --model, if any.")
     parser.add_argument("--no-features", action="store_true",
                         help="Skip the feature medians.")
-    parser.add_argument("--feature-ai-n", type=_non_negative_int, default=500,
+    parser.add_argument("--feature-ai-n", type=non_negative_int, default=500,
                         help="Corpus AI texts for the AI feature medians (default: 500).")
-    parser.add_argument("--batch-size", type=_positive_int, default=4096,
+    parser.add_argument("--batch-size", type=positive_int, default=4096,
                         help="Texts per predict_proba call (default: 4096).")
     parser.add_argument("--out-dir", type=Path,
                         help="Default: reports/fairness/<model> (or compare-<models>).")
@@ -350,12 +313,6 @@ def choose_threshold(args: argparse.Namespace, model: Any,
 # --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
-def _pct(x: Any) -> str:
-    if x is None or (isinstance(x, float) and math.isnan(x)):
-        return "n/a"
-    return f"{100 * x:.1f}%"
-
-
 def _ci(row: dict[str, Any]) -> str:
     if row.get("ci_low") is None or row.get("ci_high") is None:
         return "n/a"
@@ -375,12 +332,6 @@ def _num(x: Any, digits: int = 2) -> str:
 def _status(row: dict[str, Any], min_n: int) -> str:
     return {"far_above": "**far above**", "above_uncertain": "above (not significant)",
             "ok": "ok", "too_small": f"too small (n < {min_n})"}.get(row.get("status"), "")
-
-
-def _table(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> list[str]:
-    from skolfie.eval.report import _table as report_table
-
-    return report_table(header, rows)
 
 
 def _human_tables(res: dict[str, Any], section: str) -> list[str]:
@@ -531,7 +482,6 @@ def render_md(report: dict[str, Any]) -> str:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    _ensure_repo_on_path()
     started = time.time()
 
     names = [n for n, _ in args.model]

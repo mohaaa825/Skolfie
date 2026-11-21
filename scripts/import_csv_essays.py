@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import importlib.util
 import json
 import re
 import sys
@@ -51,32 +50,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
     sys.path.insert(0, str(REPO_ROOT))
 
-from skolfie.data.generation.markdown import strip_markdown  # noqa: E402,F401
+from scripts.generate_ai_texts import clean_output, make_record, output_path  # noqa: E402
+from skolfie.data.generation.markdown import strip_markdown  # noqa: E402
 from skolfie.data.generation.prompts import PromptSpec, max_tokens_for  # noqa: E402
 
 COLUMNS = {"number": "Essay Number", "model": "Model Used", "grade": "Grade Level",
            "type": "Essay Type", "length": "Target Length", "prompt": "Prompt",
            "text": "Generated Essay"}
 _TOPIC_RE = re.compile(r"^Write an? .+? (?:about|on) (.+?)\.\s+Write like", re.IGNORECASE)
-
-
-def _generate_module():
-    name = "skolfie_generate_ai_texts"
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(
-        name, REPO_ROOT / "scripts" / "generate_ai_texts.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[name] = module  # dataclasses look their module up while it executes
-    module_ok = False
-    try:
-        spec.loader.exec_module(module)
-        module_ok = True
-    finally:
-        if not module_ok:
-            del sys.modules[name]
-    return module
 
 
 def slug(text: str) -> str:
@@ -115,7 +96,6 @@ def generator_of(model: str) -> str:
 
 
 def import_csv(path: Path, out_dir: Path, prefix: str) -> dict[str, Counter]:
-    gen = _generate_module()
     with open(path, encoding="utf-8-sig", newline="") as fh:
         rows = list(csv.DictReader(fh))
     missing = [c for c in COLUMNS.values() if rows and c not in rows[0]]
@@ -127,16 +107,16 @@ def import_csv(path: Path, out_dir: Path, prefix: str) -> dict[str, Counter]:
         generator = generator_of(row[COLUMNS["model"]])
         c = counts.setdefault(generator, Counter())
         c["rows"] += 1
-        text, why = gen.clean_output(strip_markdown(row[COLUMNS["text"]] or ""))
+        text, why = clean_output(strip_markdown(row[COLUMNS["text"]] or ""))
         if text is None:
             c[why] += 1
             continue
         records.setdefault(generator, []).append(
-            gen.make_record(generator, row_spec(row, prefix), text))
+            make_record(generator, row_spec(row, prefix), text))
         c["written"] += 1
     out_dir.mkdir(parents=True, exist_ok=True)
     for generator, recs in records.items():
-        with open(gen.output_path(out_dir, generator), "w", encoding="utf-8") as fh:
+        with open(output_path(out_dir, generator), "w", encoding="utf-8") as fh:
             for rec in recs:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return counts

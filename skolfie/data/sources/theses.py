@@ -101,7 +101,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
-from skolfie.data.schema import Record
+from skolfie.data.schema import Record, count_words
 from skolfie.data.sources._common import iter_jsonl, missing_files_error
 from skolfie.data.sources.pes2o import looks_english, make_sections, year_of
 
@@ -164,7 +164,6 @@ _DC = "{http://purl.org/dc/elements/1.1/}"
 @dataclass
 class OaiRecord:
     identifier: str
-    datestamp: str
     deleted: bool
     fields: dict[str, list[str]]
 
@@ -191,7 +190,6 @@ def parse_list_records(xml: bytes) -> tuple[list[OaiRecord], str | None, str | N
                     fields.setdefault(el.tag[len(_DC):], []).append(el.text.strip())
         records.append(OaiRecord(
             identifier=(header.findtext(f"{_OAI}identifier") or "").strip(),
-            datestamp=(header.findtext(f"{_OAI}datestamp") or "").strip(),
             deleted=header.get("status") == "deleted",
             fields=fields,
         ))
@@ -617,7 +615,7 @@ class _Harvester:
         if not pdf_url:
             self._count("no_pdf")
             return None
-        if len(text.split()) < min_words or not looks_english(text):
+        if count_words(text) < min_words or not looks_english(text):
             self._count("rejected_text")
             return None
         self._count("kept")

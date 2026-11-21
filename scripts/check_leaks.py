@@ -27,12 +27,8 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _ensure_repo_on_path() -> None:
-    root = str(REPO_ROOT)
-    if root not in sys.path:
-        sys.path.insert(0, root)
+if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,7 +114,6 @@ def render(report: dict) -> str:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    _ensure_repo_on_path()
     import pandas as pd
 
     args = build_parser().parse_args(argv)

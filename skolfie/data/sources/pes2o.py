@@ -67,7 +67,7 @@ import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
-from skolfie.data.schema import Record
+from skolfie.data.schema import Record, count_words
 from skolfie.data.sources._common import _hf, hf_download_file, missing_files_error
 
 log = logging.getLogger(__name__)
@@ -112,14 +112,10 @@ _YEAR_PAREN = re.compile(r"\(\s*(?:19|20)\d{2}[a-z]?\s*\)|\b(?:19|20)\d{2}[a-z]?
 _REF_START = re.compile(r"^\s*(?:\[\d+\]|\d+\.\s+[A-Z][a-z]+,|[A-Z][a-z]+,\s+[A-Z]\.)")
 
 
-def word_count(text: str) -> int:
-    return len(text.split())
-
-
 def looks_like_heading(paragraph: str) -> bool:
     """A short line without final punctuation: a title or section heading."""
     text = paragraph.strip()
-    return word_count(text) < 12 and not text.endswith((".", "?", "!", ":", ";", '"', "”"))
+    return count_words(text) < 12 and not text.endswith((".", "?", "!", ":", ";", '"', "”"))
 
 
 def looks_like_junk(paragraph: str) -> bool:
@@ -127,7 +123,7 @@ def looks_like_junk(paragraph: str) -> bool:
     text = paragraph.strip()
     if not text:
         return True
-    n_words = word_count(text)
+    n_words = count_words(text)
     chars = [c for c in text if not c.isspace()]
     digits = sum(c.isdigit() for c in chars)
     if chars and digits / len(chars) > 0.15:
@@ -195,7 +191,7 @@ def make_sections(paragraphs: Iterable[str], min_words: int, max_words: int) -> 
             continue
         if looks_like_heading(paragraph):
             continue
-        n = word_count(paragraph)
+        n = count_words(paragraph)
         if n > max_words:
             flush()
             continue
@@ -304,7 +300,7 @@ def paper_section(row: dict, seed: int, min_words: int, max_words: int,
     year = year_of(row.get("created"))
     if before_year is not None and year is not None and year >= before_year:
         return None
-    if word_count(text) < min_words:
+    if count_words(text) < min_words:
         return None
     sections = [s for s in make_sections(split_paragraphs(text), min_words, max_words)
                 if looks_english(s)]

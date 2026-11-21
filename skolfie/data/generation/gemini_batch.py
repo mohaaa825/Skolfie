@@ -39,6 +39,7 @@ from typing import Any, Callable, Optional
 from skolfie.data.generation.essay_plan import MAX_WORDS, MIN_WORDS, SYSTEM_INSTRUCTION
 from skolfie.data.generation.markdown import strip_markdown
 from skolfie.data.generation.prompts import PromptSpec
+from skolfie.data.schema import count_words
 
 MODEL = "gemini-3.5-flash-lite"
 GENERATOR = "gemini-3.5-flash-lite"
@@ -51,10 +52,6 @@ THINKING_TOKENS_EST = 150     # per essay at thinking level "minimal" (estimate 
 TOKENS_PER_WORD = 1.35
 TERMINAL_STATES = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED",
                    "JOB_STATE_EXPIRED"}
-
-
-def count_words(text: str) -> int:
-    return len(text.split())
 
 
 def request_line(key: str, text: str, *, system_instruction: str = SYSTEM_INSTRUCTION,

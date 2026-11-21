@@ -5,8 +5,9 @@ Registry of corpus source loaders.
 
 Each source module exposes NAME, DESCRIPTION, CITATION, LICENSE_NOTE,
 MANUAL_DOWNLOAD and `load(raw_dir, download=True) -> Iterator[Record]`; a loader
-may take extra keyword options (persuade: `max_essays`, `seed`), which the
-corpus builder passes through `source_options`.
+may take extra keyword options (persuade: `max_essays`, `seed`,
+`keep_min_words`; pes2o and theses: `max_texts`, `seed`, `min_words`, ...),
+which the corpus builder passes through `source_options`.
 `raw_dir` is the top-level raw data directory; each loader reads (and
 downloads into) its own `raw_dir/<NAME>/` subdirectory. Missing data raises
 FileNotFoundError naming the expected path, and a failed download raises
