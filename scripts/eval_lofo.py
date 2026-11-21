@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts._cli import comma_list, positive_float, positive_int  # noqa: E402
+from scripts._cli import comma_list, open_share, positive_float, positive_int  # noqa: E402
 from scripts.evaluate import parse_oversample  # noqa: E402
 
 LOFO_MODELS = ("features", "features-nolm", "features-rf", "features-nolm-rf", "transformer",
@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "slow and needs a GPU).")
     parser.add_argument("--out-dir", type=Path, default=Path("reports_modern") / "lofo",
                         help="Output directory (default: reports_modern/lofo).")
-    parser.add_argument("--max-fpr", type=float, default=0.01,
+    parser.add_argument("--max-fpr", type=open_share, default=0.01,
                         help="Human FPR on val that sets the cut-off (default: 0.01).")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-train", type=positive_int)
@@ -125,8 +125,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if not args.corpus.is_file():
         parser.error(f"--corpus file not found: {args.corpus}")
-    if not 0 < args.max_fpr < 1:
-        parser.error("--max-fpr must be in (0, 1)")
     if args.bino_observer and not args.model.startswith("features"):
         parser.error("--bino-observer is for the feature models only")
     try:

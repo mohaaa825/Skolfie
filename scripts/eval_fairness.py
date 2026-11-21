@@ -59,19 +59,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without installing
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts._cli import named_path, non_negative_int, positive_int, share  # noqa: E402
+from scripts._cli import named_path, non_negative_int, open_share, positive_int, share  # noqa: E402
 from skolfie.eval.report import _pct, _table  # noqa: E402
 
 DEFAULT_EVAL_SPLITS = "test,test_ood_domain"
 # build_fairness_sets.py writes fairness_manifest.json; the others are fallbacks.
 MANIFEST_NAMES = ("fairness_manifest.json", "{stem}_manifest.json", "manifest.json")
-
-
-def _open_fraction(value: str) -> float:
-    x = float(value)
-    if not 0 < x < 1:
-        raise argparse.ArgumentTypeError("must be between 0 and 1 (exclusive)")
-    return x
 
 
 def _at_least_one(value: str) -> float:
@@ -99,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Flag texts with P(ai) above this, for every model (default: the "
                              "model's cutoffs['ai_threshold'], else the --max-fpr cut-off on "
                              "--threshold-split).")
-    parser.add_argument("--max-fpr", type=_open_fraction, default=0.01,
+    parser.add_argument("--max-fpr", type=open_share, default=0.01,
                         help="Human FPR on --threshold-split that sets the threshold of a "
                              "model without cut-offs (default: 0.01).")
     parser.add_argument("--threshold-split", default="val",

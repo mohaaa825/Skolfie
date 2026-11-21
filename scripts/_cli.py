@@ -41,6 +41,14 @@ def share(value: str) -> float:
     return x
 
 
+def open_share(value: str) -> float:
+    """A number strictly between 0 and 1."""
+    x = float(value)
+    if not 0 < x < 1:
+        raise argparse.ArgumentTypeError("must be between 0 and 1 (exclusive)")
+    return x
+
+
 def named_path(value: str) -> tuple[str, Path]:
     """`NAME=PATH`, or a bare `PATH` named after its file stem."""
     name, sep, path = value.partition("=")
