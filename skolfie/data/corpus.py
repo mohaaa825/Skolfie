@@ -47,7 +47,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from skolfie.data.schema import COLUMNS, LABELS, Record
+from skolfie.data.schema import COLUMNS, LABELS, Record, count_words
 
 log = logging.getLogger(__name__)
 
@@ -140,10 +140,6 @@ def normalized_hash(text: str) -> bytes:
     return hashlib.blake2b(key.encode("utf-8"), digest_size=16).digest()
 
 
-def count_words(text: str) -> int:
-    return len(text.split())
-
-
 # --------------------------------------------------------------------------- #
 # Registry
 # --------------------------------------------------------------------------- #
@@ -161,15 +157,13 @@ def load_registry() -> Mapping[str, ModuleType]:
 
 
 def source_hint(module: Any) -> str:
-    """Best-effort description of what a source needs (URL / files), for errors."""
+    """Best-effort description of where a source downloads from, for errors."""
     parts = []
-    for attr in ("URL", "URLS", "DATASET_URL", "HF_DATASET", "REPO_ID", "FILES", "REQUIRED_FILES"):
+    for attr in ("URL", "URLS", "REPO_ID"):
         value = getattr(module, attr, None)
         if value:
-            if isinstance(value, (list, tuple, set)):
+            if isinstance(value, (list, tuple)):
                 value = ", ".join(map(str, value))
-            elif isinstance(value, dict):
-                value = ", ".join(f"{k}={v}" for k, v in value.items())
             parts.append(f"{attr}={value}")
     return "; ".join(parts)
 

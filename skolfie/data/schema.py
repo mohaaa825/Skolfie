@@ -32,6 +32,11 @@ COLUMNS = [
 ]
 
 
+def count_words(text: str) -> int:
+    """Whitespace word count, as stored in `n_words`."""
+    return len(text.split())
+
+
 @dataclass
 class Record:
     id: str
@@ -52,7 +57,7 @@ class Record:
         if self.label == "human" and self.generator != "human":
             raise ValueError("human records must have generator='human'")
         if not self.n_words:
-            self.n_words = len(self.text.split())
+            self.n_words = count_words(self.text)
 
     def to_dict(self) -> dict:
         return asdict(self)

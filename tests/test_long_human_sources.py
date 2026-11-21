@@ -290,14 +290,14 @@ def test_student_thesis_and_language_checks():
 
 
 def test_pdf_candidates_and_landing_page():
-    rec = OaiRecord("oai:DiVA.org:kth-123456", "2020-01-01", False, {
+    rec = OaiRecord("oai:DiVA.org:kth-123456", False, {
         "identifier": ["http://urn.kb.se/resolve?urn=urn:nbn:se:kth:diva-123456",
                        "https://example.org/thesis.pdf"]})
     assert theses.pdf_candidates(rec, "diva") == [
         "https://example.org/thesis.pdf",
         "https://www.diva-portal.org/smash/get/diva2:123456/FULLTEXT01.pdf"]
     assert theses.landing_page(rec, "diva").startswith("http://urn.kb.se/")
-    lup = OaiRecord("oai:lup.lub.lu.se:8901234", "", False, {
+    lup = OaiRecord("oai:lup.lub.lu.se:8901234", False, {
         "identifier": ["https://lup.lub.lu.se/student-papers/record/8901234"],
         "relation": ["https://lup.lub.lu.se/student-papers/record/8901234/file/8901235"]})
     assert theses.pdf_candidates(lup, "lup") == [
