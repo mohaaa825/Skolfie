@@ -3,7 +3,14 @@
 A static landing page for teachers and schools (plain HTML, CSS and JS; no build step).
 Palette: white, baby blue and pink, matching `THEME_TOKENS` in `skolfie/app/gradio_app.py`.
 
-- `index.html` page, `styles.css` look, `main.js` menu/tabs/links, `config.js` settings.
+- `index.html` page, `styles.css` look, `main.js` menu/tabs/links, `demo.js` hero demo, `config.js` settings.
+- **Hero demo:** a ~50 s live UI animation in the hero card (`demo.js`, HTML in the `.demo` figure).
+  One running example (Maya's climate essay, class 9B) in 10 chapters, each with one caption lit word
+  by word; chapter progress bar (click a chapter to jump), play/pause, cursor, and a blurred end frame
+  with "Watch again" + "Check a text". Chapters, timings and captions are the `CH` list in `demo.js`.
+  It autoplays only while on screen; with reduced motion it shows a still frame and waits for play.
+  Keep captions true to the product: update the "1 in 585" card, the "coming soon" tag on highlights
+  and the note under the demo when the app changes.
 - **Link the checker:** set `appUrl` in `config.js` to the app link (for example the Gradio
   share link from `notebooks/app.ipynb`, or your own server). Empty = the "Open the checker"
   buttons scroll to the "Try Skolfie" section instead.
