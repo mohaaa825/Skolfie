@@ -36,9 +36,6 @@ load models you trained yourself, from a path you control.
 
 from __future__ import annotations
 
-import contextlib
-import os
-import uuid
 from typing import Dict, List, Optional, Sequence
 
 import joblib
@@ -237,15 +234,10 @@ class AIDetectorModel:
     # -----------------------------------------------------------------
     def save(self, path: str):
         """Pickle the model to `path` atomically (temp file + rename)."""
-        path = os.fspath(path)
-        tmp = f"{path}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-        try:
+        from skolfie.eval.report import atomic_path
+
+        with atomic_path(path) as tmp:
             joblib.dump(self, tmp)
-            os.replace(tmp, path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.remove(tmp)
-            raise
 
     @staticmethod
     def load(path: str) -> "AIDetectorModel":

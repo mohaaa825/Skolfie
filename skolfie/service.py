@@ -593,6 +593,7 @@ def make_bundle(models_dir: str | os.PathLike[str], reports_dir: str | os.PathLi
     by file name, so the folder can be moved anywhere and loaded with
     `Detector.from_bundle`. Missing optional files are listed under "missing".
     """
+    from skolfie.eval.report import atomic_path
     from skolfie.explain.explainer import load_model, same_file
 
     files = _resolve_dirs(models_dir, reports_dir, names)
@@ -637,7 +638,6 @@ def make_bundle(models_dir: str | os.PathLike[str], reports_dir: str | os.PathLi
         "notes": files.notes,
     }
     path = out / BUNDLE_FILE
-    tmp = out / (BUNDLE_FILE + ".tmp")
-    tmp.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    with atomic_path(path) as tmp:
+        tmp.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return path
