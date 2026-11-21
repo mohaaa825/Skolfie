@@ -60,6 +60,7 @@ if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without install
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts._cli import named_path, non_negative_int, positive_int, share  # noqa: E402
+from skolfie.eval.report import _pct, _table  # noqa: E402
 
 DEFAULT_EVAL_SPLITS = "test,test_ood_domain"
 # build_fairness_sets.py writes fairness_manifest.json; the others are fallbacks.
@@ -319,12 +320,6 @@ def choose_threshold(args: argparse.Namespace, model: Any,
 # --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
-def _pct(x: Any) -> str:
-    if x is None or (isinstance(x, float) and math.isnan(x)):
-        return "n/a"
-    return f"{100 * x:.1f}%"
-
-
 def _ci(row: dict[str, Any]) -> str:
     if row.get("ci_low") is None or row.get("ci_high") is None:
         return "n/a"
@@ -344,12 +339,6 @@ def _num(x: Any, digits: int = 2) -> str:
 def _status(row: dict[str, Any], min_n: int) -> str:
     return {"far_above": "**far above**", "above_uncertain": "above (not significant)",
             "ok": "ok", "too_small": f"too small (n < {min_n})"}.get(row.get("status"), "")
-
-
-def _table(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> list[str]:
-    from skolfie.eval.report import _table as report_table
-
-    return report_table(header, rows)
 
 
 def _human_tables(res: dict[str, Any], section: str) -> list[str]:

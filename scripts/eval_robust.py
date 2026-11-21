@@ -52,6 +52,7 @@ if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without install
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts._cli import named_path, positive_int  # noqa: E402
+from skolfie.eval.report import _fmt, _pct, _table  # noqa: E402
 
 
 def _fraction(value: str) -> float:
@@ -206,18 +207,6 @@ def roadmap_check(ref: dict[str, Any], new: dict[str, Any], paraphrase: Sequence
 # --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
-def _fmt(x: Any, digits: int = 3) -> str:
-    if x is None or (isinstance(x, float) and math.isnan(x)):
-        return "n/a"
-    return f"{x:.{digits}f}" if isinstance(x, float) else str(x)
-
-
-def _pct(x: Any) -> str:
-    if x is None or (isinstance(x, float) and math.isnan(x)):
-        return "n/a"
-    return f"{100 * x:.1f}%"
-
-
 def _neg(x: Any) -> Any:
     """-x, keeping None (a NaN after `_json_safe`) as None."""
     return None if x is None else -x
@@ -229,12 +218,6 @@ def _signed(x: Any, pct: bool = False) -> str:
     if pct:
         return f"{round(100 * x, 1) + 0.0:+.1f} pp"  # + 0.0 turns -0.0 into 0.0
     return f"{round(x, 3) + 0.0:+.3f}"
-
-
-def _table(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> list[str]:
-    lines = ["| " + " | ".join(header) + " |", "|---" + "|---:" * (len(header) - 1) + "|"]
-    lines += ["| " + " | ".join(str(c) for c in row) + " |" for row in rows]
-    return lines
 
 
 def render_md(report: dict[str, Any]) -> str:

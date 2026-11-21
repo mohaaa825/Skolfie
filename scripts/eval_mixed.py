@@ -40,6 +40,7 @@ if str(REPO_ROOT) not in sys.path:  # allow `python scripts/...` without install
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts._cli import positive_int, share  # noqa: E402
+from skolfie.eval.report import _fmt, _pct, _table  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -71,24 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out-dir", type=Path)
     parser.add_argument("--seed", type=int, default=0)
     return parser
-
-
-def _fmt(x: Any, digits: int = 3) -> str:
-    if x is None or (isinstance(x, float) and x != x):
-        return "n/a"
-    return f"{x:.{digits}f}" if isinstance(x, float) else str(x)
-
-
-def _pct(x: Any) -> str:
-    if x is None or (isinstance(x, float) and x != x):
-        return "n/a"
-    return f"{100 * x:.1f}%"
-
-
-def _table(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> list[str]:
-    lines = ["| " + " | ".join(header) + " |", "|---" + "|---:" * (len(header) - 1) + "|"]
-    lines += ["| " + " | ".join(str(c) for c in row) + " |" for row in rows]
-    return lines
 
 
 def render_md(report: dict[str, Any]) -> str:
