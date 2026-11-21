@@ -39,6 +39,12 @@ Plain-ASCII text (most of the corpus) is returned at once. Otherwise it is
 a few `str.translate` calls and regex passes, plus a loop over the words
 for texts that contain a look-alike. The result is idempotent, and
 non-string input gives "" like `skolfie.data.corpus.clean_text`.
+
+Version 2 (`CURRENT_NORMALIZER`, models fitted from 2026-11-21 on) also folds
+typography to ASCII (curly quotes, en/em dashes, ellipsis, Unicode spaces)
+and replaces corpus anonymisation tags ("Generic_Name", "STUDENT_NAME") with
+plausible names, so neither can act as a source shortcut. Models store the
+version they were fitted with; older model files keep version 1.
 """
 
 from __future__ import annotations
@@ -223,13 +229,100 @@ def _normalize(text: str) -> tuple[str, int, int]:
 
 
 # --------------------------------------------------------------------------- #
+# Normaliser version 2: typography and anonymisation tags
+# --------------------------------------------------------------------------- #
+# Word processors, phones and AI chat apps write typographic quotes, dashes and
+# ellipses; plain-text exports and many essay corpora do not. Left alone, the
+# models learn "curly quote or em dash = AI" from the training sources (the
+# 2026-11-21 audit: Gemini essays 75-90% curly quotes, human essays 0%), so a
+# student who types in Word looks like AI. Version 2 folds them to ASCII.
+_TYPOGRAPHY = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u2032": "'",
+    "\u02bc": "'", "\u00b4": "'", "\u0060": "'",
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"', "\u2033": '"',
+    "\u00ab": '"', "\u00bb": '"',
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": " -- ",
+    "\u2015": " -- ", "\u2212": "-",
+    "\u2026": "...",
+    "\u00a0": " ", "\u2007": " ", "\u2009": " ", "\u200a": " ", "\u202f": " ",
+})
+# A dash between spaces, or two or more hyphens (also an em dash, see above), is " - ".
+_DASH_RE = re.compile(r"[ \t]*(?:(?<=[ \t])-(?=[ \t])|-{2,})[ \t]*")
+_SPACES_RE = re.compile(r"[ \t]{2,}")
+_TRAILING_RE = re.compile(r"[ \t]+(?=\n)|(?<=\n)[ \t]+")
+_BLANK_LINES_RE = re.compile(r"\n{3,}")
+
+# Anonymisation tags of the PERSUADE / ELLIPSE / Feedback Prize essays
+# ("Generic_Name", "Generic_School", "PROPER_NAME", "STUDENT_NAME"). Students
+# never type them, so in training they only say "this is a human corpus essay".
+_PLACEHOLDER_RE = re.compile(r"\b(?:Generic_?[A-Z][A-Za-z]*|[A-Z]{2,}(?:_[A-Z]+)*_NAME)\b")
+_PLACEHOLDER_FILL = {
+    "school": ("Lincoln High School", "Oak Ridge Middle School", "Westfield School",
+               "Riverside Academy"),
+    "city": ("Springfield", "Fairview", "Greenville", "Madison"),
+    "place": ("Springfield", "Fairview", "Greenville", "Madison"),
+    "location": ("Springfield", "Fairview", "Greenville", "Madison"),
+    "teacher": ("Mr. Johnson", "Ms. Garcia", "Mrs. Patel", "Mr. Okafor"),
+}
+_PLACEHOLDER_NAMES = ("Emma", "Liam", "Sofia", "Noah", "Aisha", "Lucas", "Maya", "Omar",
+                      "Chloe", "Daniel", "Lena", "Mateo")
+
+
+def _fill(tag: str, k: int) -> str:
+    low = tag.lower()
+    for key, options in _PLACEHOLDER_FILL.items():
+        if key in low:
+            return options[k % len(options)]
+    return _PLACEHOLDER_NAMES[k % len(_PLACEHOLDER_NAMES)]
+
+
+def _replace_placeholders(text: str) -> str:
+    """Each tag becomes a plausible value; the same tag in a text gets the same value."""
+    if "_" not in text:
+        return text
+    seen: dict[str, str] = {}
+    base = sum(map(ord, text[:64]))
+
+    def sub(m: re.Match[str]) -> str:
+        tag = m.group()
+        if tag not in seen:
+            seen[tag] = _fill(tag, base + len(seen))
+        return seen[tag]
+
+    return _PLACEHOLDER_RE.sub(sub, text)
+
+
+def _typography(text: str) -> str:
+    if not text.isascii():
+        text = text.translate(_TYPOGRAPHY)
+    if "-" in text:
+        text = _DASH_RE.sub(" - ", text)
+    text = _SPACES_RE.sub(" ", text)
+    text = _TRAILING_RE.sub("", text)
+    return _BLANK_LINES_RE.sub("\n\n", text).strip()
+
+
+# --------------------------------------------------------------------------- #
 # API
 # --------------------------------------------------------------------------- #
-def normalize_for_scoring(text: Any) -> str:
+# 1: invisible characters and look-alike letters (models before 2026-11-21).
+# 2: also typography (quotes, dashes, ellipses, spaces) and anonymisation tags.
+# A model stores the version it was fitted with, so an old model file keeps
+# scoring exactly as before.
+NORMALIZER_VERSIONS = (1, 2)
+CURRENT_NORMALIZER = 2
+
+
+def normalize_for_scoring(text: Any, version: int = 1) -> str:
     """The text as the models see it (see the module docstring); "" for non-strings."""
     if not isinstance(text, str):
         return ""
-    return _normalize(text)[0]
+    if version not in NORMALIZER_VERSIONS:
+        raise ValueError(f"unknown normaliser version {version!r}")
+    out = _normalize(text)[0]
+    if version >= 2:
+        out = _replace_placeholders(_typography(out))
+    return out
 
 
 def obfuscation_stats(text: Any) -> dict[str, int]:

@@ -24,6 +24,10 @@ list of texts and has a stable name; `get_attack(name)` returns its
     temp_low/high   fresh generation at temperature 0.2 / 1.3: the     API key  ai
                     original prompt for "fresh:" ids, else a
                     continuation of the text's opening sentences
+    word_typography   what Word / Google Docs autocorrect does: curly    -        ai + human
+                    quotes and apostrophes, en / em dashes, "…"
+    plain_typography  the reverse: straight quotes, "-", "..." (a      -        ai + human
+                    plain-text editor, or a student cleaning up)
     human_edit_<pct>  splice, standing in for human-edited AI text     -        ai
                     (no such data exists): <pct>% of the sentences
                     are replaced by sentences of human texts of the
@@ -91,6 +95,12 @@ _FAMILIES: dict[str, dict[str, Any]] = {
                                   "the same source and domain (splice, not real human edits)"},
 }
 _FIXED: dict[str, AttackSpec] = {
+    "word_typography": AttackSpec(
+        "word_typography", "format", "Word-style curly quotes, en / em dashes and ellipses",
+        applies_to="both"),
+    "plain_typography": AttackSpec(
+        "plain_typography", "format", "straight quotes, plain hyphens and three dots",
+        applies_to="both"),
     "t5_paraphrase": AttackSpec(
         "t5_paraphrase", "paraphrase", "every sentence paraphrased by a T5 model",
         needs_gpu=True),
@@ -133,7 +143,8 @@ def get_attack(name: str) -> AttackSpec:
 
 # The default suite, in report order.
 ATTACKS: dict[str, AttackSpec] = {}
-for _name in ("typo_5", "typo_15", "synonym_15", "homoglyph", "zero_width", "t5_paraphrase",
+for _name in ("typo_5", "typo_15", "synonym_15", "homoglyph", "zero_width", "word_typography",
+              "plain_typography", "t5_paraphrase",
               "llm_paraphrase", "humanizer", "temp_low", "temp_high", "human_edit_30"):
     ATTACKS[_name] = get_attack(_name)
 PARAPHRASE_ATTACKS = ("t5_paraphrase", "llm_paraphrase", "humanizer")
@@ -409,6 +420,38 @@ def zero_width_text(text: str, rate: float, rng: random.Random) -> str:
         pos = m.start() + rng.randrange(1, len(m.group()))
         edits.append((pos, pos, ZERO_WIDTH))
     return _replace_spans(text, edits)
+
+
+# --------------------------------------------------------------------------- #
+# Typography (what a word processor's autocorrect does, and its reverse)
+# --------------------------------------------------------------------------- #
+_OPEN_CONTEXT = re.compile(r"(^|[\s(\[{\u2014\u2013-])$")
+
+
+def word_typography(text: str) -> str:
+    """Curly quotes and apostrophes, " -- " as an em dash, " - " as an en dash, "…"."""
+    text = re.sub(r"\s*--\s*", "\u2014", text)
+    text = re.sub(r"(?<=\S) - (?=\S)", " \u2013 ", text)
+    text = text.replace("...", "\u2026")
+    out = []
+    for i, c in enumerate(text):
+        if c in "\"'":
+            opening = bool(_OPEN_CONTEXT.search(text[max(0, i - 1):i])) or i == 0
+            if c == '"':
+                c = "\u201c" if opening else "\u201d"
+            else:
+                c = "\u2018" if opening else "\u2019"
+        out.append(c)
+    return "".join(out)
+
+
+_PLAIN = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+                        "\u2013": "-", "\u2026": "..."})
+
+
+def plain_typography(text: str) -> str:
+    """Straight quotes, "-" for en dashes, " - " for em dashes, "..." for "…"."""
+    return re.sub(r"\s*\u2014\s*", " - ", text).translate(_PLAIN)
 
 
 # --------------------------------------------------------------------------- #
@@ -724,6 +767,10 @@ def apply_attack(name: str, frame: Any, ctx: AttackContext) -> list[str | None]:
             raise ValueError(f"{name} needs a donor pool of human texts (ctx.donors)")
         return [human_edit_text(t, s, d, spec.rate, r, ctx.donors)
                 for t, s, d, r in zip(texts, frame["source"], frame["domain"], rngs)]
+    if name == "word_typography":
+        return [word_typography(t) for t in texts]
+    if name == "plain_typography":
+        return [plain_typography(t) for t in texts]
     if name == "t5_paraphrase":
         if ctx.paraphraser is None:
             ctx.paraphraser = T5Paraphraser(log=ctx.log)

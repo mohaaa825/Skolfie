@@ -43,6 +43,11 @@ explicit decision from the project owner, not a cleanup.
    `__setstate__`/`predict` read.
 2. **Model behaviour.** A refactor must give the same scores for the same
    input and the same model file.
+   Input normalisation is versioned (`skolfie.robust.normalize`,
+   `CURRENT_NORMALIZER`): a model stores the version it was fitted with in
+   `normalizer`, and files without it use version 1. Version 2 (models
+   fitted from 2026-11-21 on) also folds typography and replaces corpus
+   anonymisation tags. Change what a version does only by adding a new one.
 3. **Notebook interfaces.** `retrain_modern.ipynb`, `app.ipynb`,
    `generate_modern.ipynb` and `generate_gemini_batch.ipynb` are what the
    owner runs. Keep their parameters, Drive paths and the script flags and

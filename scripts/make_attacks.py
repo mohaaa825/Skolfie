@@ -115,6 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-words", type=positive_int, default=400,
                         help="Cut texts (and attack outputs) at a sentence boundary to at most "
                              "N words (default: 400).")
+    parser.add_argument("--sources",
+                        help="Comma-separated corpus sources to sample from, e.g. "
+                             "persuade,fresh for student essays only (default: all).")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--force", action="store_true",
                         help="Rebuild every attack instead of reusing parts/ from a previous run.")
@@ -333,6 +336,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for col in ("generator", "source", "domain"):
         if col not in frame:
             frame[col] = "unknown"
+    if args.sources:
+        wanted = {x.strip() for x in args.sources.split(",") if x.strip()}
+        frame = frame[frame["source"].isin(wanted)].reset_index(drop=True)
+        if frame.empty:
+            parser.error(f"no texts of sources {sorted(wanted)} in split {args.split!r}")
     frame["text"] = frame["text"].astype(str)
     n_words = frame["text"].str.split().str.len()
     eligible = frame[n_words >= args.min_words]
@@ -492,7 +500,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "mode": "augment" if augment else "eval", "split": args.split, "seed": args.seed,
         "n": args.n or (None if augment else DEFAULT_N), "share": args.share,
         "weights": dict(args.weight) or None,
-        "min_words": args.min_words, "max_words": cap,
+        "min_words": args.min_words, "max_words": cap, "sources": args.sources,
         "corpus": str(args.corpus), "corpus_version": manifest.get("corpus_version"),
         "splits_version": manifest.get("splits_version"),
         "clean": None if sample is None else {

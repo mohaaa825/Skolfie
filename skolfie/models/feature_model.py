@@ -55,7 +55,7 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from skolfie.eval.metrics import to_binary
-from skolfie.robust.normalize import normalize_for_scoring
+from skolfie.robust.normalize import CURRENT_NORMALIZER, normalize_for_scoring
 
 # Bump when a feature formula changes without its name changing, so the
 # on-disk caches are rebuilt.
@@ -76,9 +76,9 @@ def as_text(t: Any) -> str:
     return str(t)
 
 
-def scoring_texts(texts: Sequence[Any]) -> list[str]:
+def scoring_texts(texts: Sequence[Any], normalizer: int = 1) -> list[str]:
     """Texts as the models see them: `as_text`, then `normalize_for_scoring`."""
-    return [normalize_for_scoring(as_text(t)) for t in texts]
+    return [normalize_for_scoring(as_text(t), normalizer) for t in texts]
 
 
 class FeatureModel:
@@ -122,6 +122,7 @@ class FeatureModel:
         self.bino_max_tokens = bino_max_tokens
         self.bino_batch_size = bino_batch_size
         self.bino_quantization = bino_quantization or None
+        self.normalizer = CURRENT_NORMALIZER
         # Display only (reports, logs): files are found by the names callers give them.
         self.name = ("features" + ("" if use_lm else "-nolm")
                      + ("-rf" if classifier == "rf" else "")
@@ -149,13 +150,14 @@ class FeatureModel:
         # Models saved before the Binoculars features existed: off.
         for key, default in (("bino_observer", None), ("bino_performer", None),
                              ("bino_max_tokens", 256), ("bino_batch_size", 8),
-                             ("bino_quantization", None), ("_bino", None)):
+                             ("bino_quantization", None), ("_bino", None),
+                             ("normalizer", 1)):
             state.setdefault(key, default)
         self.__dict__.update(state)
 
     def params(self) -> dict[str, Any]:
         out = {k: getattr(self, k) for k in (
-            "classifier", "use_lm", "delta_words", "delta_folds", "seed")}
+            "classifier", "use_lm", "delta_words", "delta_folds", "seed", "normalizer")}
         if self.use_lm:
             out.update(lm_model=self.lm_model, lm_max_tokens=self.lm_max_tokens)
         if self.bino_observer:
@@ -231,7 +233,7 @@ class FeatureModel:
         Needs no fitting; the transformer model (step 5) reuses it. Never
         includes the Binoculars columns (see `_model_features`).
         """
-        return self._base_features(scoring_texts(texts))
+        return self._base_features(scoring_texts(texts, self.normalizer))
 
     def _base_features(self, texts: list[str]) -> tuple[np.ndarray, list[str]]:
         from skolfie.features.style import STYLE_FEATURES
@@ -275,7 +277,7 @@ class FeatureModel:
         """Feature matrix for new texts (columns in `feature_names_` order)."""
         if self.delta_ is None:
             raise RuntimeError("FeatureModel is not fitted")
-        texts = scoring_texts(texts)
+        texts = scoring_texts(texts, self.normalizer)
         base, _ = self._model_features(texts)
         return np.hstack([base, self.delta_.transform(texts)])
 
@@ -324,7 +326,7 @@ class FeatureModel:
     def fit(self, texts: Sequence[str], labels: Sequence[Any]) -> "FeatureModel":
         from skolfie.features.delta_features import DELTA_FEATURES
 
-        texts = scoring_texts(texts)
+        texts = scoring_texts(texts, self.normalizer)
         y = to_binary(labels)
         if len(texts) != len(y):
             raise ValueError("texts and labels must have the same length")
