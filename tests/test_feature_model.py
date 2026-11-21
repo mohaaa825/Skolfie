@@ -126,6 +126,67 @@ def test_cache_rejects_wrong_shape(tmp_path: Path) -> None:
         cache.compute(["a"], lambda texts: np.zeros((len(texts), 3)))
 
 
+def _len_and_one(texts: list[str]) -> np.ndarray:
+    return np.array([[len(t), 1.0] for t in texts], dtype=np.float32)
+
+
+def test_cache_ignores_a_corrupt_file_and_rebuilds_it(tmp_path: Path) -> None:
+    (tmp_path / "x.parquet").write_bytes(b"PAR1 truncated by a dropped Colab session")
+    logs: list[str] = []
+    cache = FeatureCache(tmp_path, "x", ["a", "b"], log=logs.append)
+    assert len(cache) == 0 and any("unreadable" in m for m in logs)
+    np.testing.assert_array_equal(cache.compute(["hey"], _len_and_one), [[3, 1]])
+    assert len(FeatureCache(tmp_path, "x", ["a", "b"], log=lambda m: None)) == 1
+
+
+def test_cache_file_with_duplicate_keys_keeps_rows_aligned(tmp_path: Path) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    pq.write_table(pa.table({"key": [text_key("aa"), text_key("aa"), text_key("c")],
+                             "a": [7.0, 8.0, 9.0], "b": [1.0, 1.0, 1.0]}),
+                   tmp_path / "dup.parquet")
+    cache = FeatureCache(tmp_path, "dup", ["a", "b"], log=lambda m: None)
+    out = cache.compute(["aa", "c", "bbbbb"], _len_and_one)
+    np.testing.assert_array_equal(out, [[7, 1], [9, 1], [5, 1]])
+    reloaded = FeatureCache(tmp_path, "dup", ["a", "b"], log=lambda m: None)
+    np.testing.assert_array_equal(reloaded.compute(["bbbbb", "c"], _len_and_one), [[5, 1], [9, 1]])
+
+
+def test_cache_in_an_unwritable_dir_falls_back_to_memory(tmp_path: Path) -> None:
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    logs: list[str] = []
+    cache = FeatureCache(blocker / "cache", "y", ["a", "b"], log=logs.append)
+    np.testing.assert_array_equal(cache.compute(["hi", "hey"], _len_and_one), [[2, 1], [3, 1]])
+    assert cache.path is None and any("in memory only" in m for m in logs)
+    np.testing.assert_array_equal(cache.compute(["hey"], _len_and_one), [[3, 1]])
+
+
+def test_cache_flush_is_atomic_and_leaves_no_temp_files(tmp_path: Path, monkeypatch) -> None:
+    cache = FeatureCache(tmp_path, "z", ["a", "b"], log=lambda m: None)
+    cache.compute(["one"], _len_and_one)
+    before = (tmp_path / "z.parquet").read_bytes()
+
+    import pyarrow.parquet as pq
+
+    def crash(table, where, *args, **kwargs):
+        Path(where).write_bytes(b"half")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pq, "write_table", crash)
+    with pytest.raises(KeyboardInterrupt):
+        cache.compute(["two"], _len_and_one)
+    assert (tmp_path / "z.parquet").read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["z.parquet"]
+
+
+def test_text_key_survives_lone_surrogates() -> None:
+    assert text_key("a\ud800b") != text_key("ab")
+    assert text_key("héllo") == text_key("héllo".replace("é", "é"))
+
+
+
 # --------------------------------------------------------------------------- #
 # FeatureModel
 # --------------------------------------------------------------------------- #
@@ -369,3 +430,22 @@ def test_make_scorer_bino_options(model_cls) -> None:
         "Qwen/Qwen2.5-1.5B", "Qwen/Qwen2.5-1.5B-Instruct", 64, 4)
     assert m.name == "features+bino"
     assert make_scorer("features").bino_observer is None
+
+
+_HUMAN = ["I went to the shop today and it was fine, honestly.",
+          "We don't really know what happened lol."]
+_AI = ["Moreover, it is important to note that the results are significant.",
+       "In conclusion, the analysis demonstrates robust outcomes overall."]
+
+
+def test_feature_model_small_train_set_and_missing_texts() -> None:
+    pytest.importorskip("lightgbm")
+    from skolfie.models.feature_model import FeatureModel
+
+    texts = (_HUMAN + _AI) * 3 + [None]
+    labels = ["human", "human", "ai", "ai"] * 3 + ["human"]
+    model = FeatureModel(use_lm=False, n_jobs=1, log=lambda m: None).fit(texts, labels)
+    p = model.predict_proba([None, float("nan"), "", "Moreover, overall it is crucial."])
+    assert p.shape == (4,) and np.isfinite(p).all()
+    assert p[0] == p[1] == p[2]
+

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from skolfie.app import gradio_app as app
@@ -211,6 +212,43 @@ def test_check_text_empty_and_not_ready() -> None:
     assert "No models are loaded" in html and state is None
 
 
+def test_check_rejects_overlong_text_before_model() -> None:
+    detector = FakeDetector()
+    out, state = app.check_text(_holder(detector), "word " * (app.MAX_TEXT_CHARS // 5 + 1), None)
+    assert "too long" in out and state is None and not detector.texts
+
+
+def test_check_file_errors_hide_paths(tmp_path: Path) -> None:
+    pytest.importorskip("docx")
+    bad = tmp_path / "upload.docx"
+    bad.write_bytes(b"not a zip")
+    out, state = app.check_text(_holder(), "", str(bad))
+    assert "Could not read the file" in out and state is None
+    assert str(tmp_path) not in out
+
+
+def test_check_unexpected_read_error_is_generic(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_args):
+        raise OSError("/very/secret/path is gone")
+
+    monkeypatch.setattr(app, "extract_text_from_file", boom)
+    out, _ = app.check_text(_holder(), "", "/x/upload.txt")
+    assert "secret" not in out and "Could not read the file" in out
+
+
+def test_check_escapes_html_in_error(tmp_path: Path) -> None:
+    path = tmp_path / "x.<img src=x onerror=alert(1)>"
+    path.write_text("hello")
+    out, _ = app.check_text(_holder(), "", str(path))
+    assert "<img" not in out and "&lt;img" in out
+
+
+def test_check_prediction_error_is_generic() -> None:
+    out, state = app.check_text(_holder(FakeDetector(fail=True)), "one two three four five six",
+                                None)
+    assert "could not check" in out and "secret" not in out and state is None
+
+
 def test_holder_without_models_explains_how_to_get_them() -> None:
     def missing(_source):
         raise FileNotFoundError("stacked.joblib not found; run notebooks/stack.ipynb")
@@ -333,6 +371,15 @@ def launcher(monkeypatch: pytest.MonkeyPatch):
     return built
 
 
+def test_main_defaults_are_local_only(launcher) -> None:
+    app.main([])
+    kwargs = launcher["app"].kwargs
+    assert kwargs["server_name"] == "127.0.0.1"
+    assert kwargs["share"] is False
+    assert kwargs["auth"] is None
+    assert kwargs["max_file_size"] == app.MAX_FILE_BYTES
+
+
 def test_main_refuses_share_or_public_host_without_auth(launcher) -> None:
     for argv in (["--share"], ["--host", "0.0.0.0"]):
         with pytest.raises(SystemExit):
@@ -422,6 +469,39 @@ def test_manual_examples_and_export(tmp_path: Path) -> None:
         assert out.exists()
     finally:
         out.unlink(missing_ok=True)
+
+
+def test_submit_feedback_validates_choices(tmp_path: Path) -> None:
+    csv_path = tmp_path / "fb.csv"
+    state = {"text": "t", "label": "ai", "p_ai": 0.9}
+    assert "looks right or looks wrong" in app.submit_feedback(
+        state, "sideways", None, "", csv_path)
+    assert "valid" in app.submit_feedback(state, None, "robot", "", csv_path)
+    long_comment = "x" * (app.MAX_COMMENT_CHARS + 1)
+    assert "under" in app.submit_feedback(state, "up", None, long_comment, csv_path)
+    assert not csv_path.exists()
+    msg = app.submit_feedback(state, "up", None, "", csv_path)
+    assert "saved" in msg and str(tmp_path) not in msg
+
+
+def test_manual_example_caps_text(tmp_path: Path) -> None:
+    csv_path = tmp_path / "fb.csv"
+    text = "x" * (app.MAX_TEXT_CHARS + 1)
+    assert "too long" in app.add_manual_example(text, "AI", "", csv_path)
+    assert not csv_path.exists()
+
+
+def test_export_uses_unique_temp_files(tmp_path: Path) -> None:
+    csv_path = tmp_path / "fb.csv"
+    fb.save_feedback(str(csv_path), "=1+1", "AI-Generated", "High", 0.9)
+    first = app.export_feedback_file(csv_path)
+    second = app.export_feedback_file(csv_path)
+    try:
+        assert first != second  # was one fixed name per second in the shared temp dir
+        assert pd.read_csv(first)["text"].iloc[0] == "'=1+1"
+    finally:
+        Path(first).unlink(missing_ok=True)
+        Path(second).unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- #

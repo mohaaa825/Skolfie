@@ -153,3 +153,25 @@ def test_breakdown_per_group() -> None:
     # Missing columns are skipped; the records are JSON-able.
     assert set(breakdown(df.drop(columns="source"), p)) == {"generator", "domain"}
     json.dumps(tables["domain"].to_dict(orient="records"))
+
+
+@pytest.mark.parametrize("bad", [0.7, float("nan"), None, 2, "maybe"])
+def test_to_binary_rejects_non_binary_labels(bad) -> None:
+    with pytest.raises(ValueError):
+        to_binary([bad])
+
+
+def test_to_binary_accepts_numeric_and_bool_labels() -> None:
+    np.testing.assert_array_equal(to_binary([1.0, 0, True, np.int64(1), np.float32(0)]),
+                                  [1, 0, 1, 1, 0])
+
+
+@pytest.mark.parametrize("y", [[0.7, 1.0], [np.nan, 1.0], np.array([0.5, 1.0])])
+def test_binary_metrics_rejects_fractional_labels(y) -> None:
+    with pytest.raises(ValueError, match="only 0"):
+        binary_metrics(y, [0.1, 0.9])
+
+
+def test_binary_metrics_float_labels_still_work() -> None:
+    assert binary_metrics([0.0, 1.0], [0.1, 0.9])["auroc"] == 1.0
+

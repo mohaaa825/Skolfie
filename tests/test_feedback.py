@@ -1,13 +1,18 @@
 """
 tests/test_feedback.py
 -----------------------
-Round-trip of the feedback CSV (save / load / manual label / export).
+Round-trip of the feedback CSV (save / load / manual label / export), odd and
+NA-like texts, concurrent appends and formula escaping on export.
 """
 
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
+
+import pandas as pd
+import pytest
 
 from skolfie.data.feedback import (
     FEEDBACK_COLUMNS,
@@ -16,6 +21,7 @@ from skolfie.data.feedback import (
     load_feedback,
     save_feedback,
 )
+from tests.conftest import load_script
 
 
 def test_load_creates_empty_file(tmp_path: Path) -> None:
@@ -92,12 +98,7 @@ def test_mixed_label(tmp_path: Path) -> None:
 
 
 def test_binary_training_skips_mixed_rows(tmp_path: Path) -> None:
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(
-        "skolfie_train_script_fb", Path(__file__).resolve().parent.parent / "scripts" / "train.py")
-    train = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(train)
+    train = load_script("train")
 
     csv_path = str(tmp_path / "feedback.csv")
     add_manual_label(csv_path, "Human text.", "Human-Written")
@@ -107,3 +108,63 @@ def test_binary_training_skips_mixed_rows(tmp_path: Path) -> None:
     texts, labels = train.load_feedback_data(csv_path)
     assert list(zip(texts, labels)) == [("Human text.", "human"),
                                         ("Predicted ai, thumbs up.", "ai")]
+
+
+@pytest.mark.parametrize("text", ["NA", "null", "N/A", "nan", "None", "12345"])
+def test_feedback_keeps_na_like_and_numeric_texts(tmp_path: Path, text: str) -> None:
+    csv_path = str(tmp_path / "fb.csv")
+    save_feedback(csv_path, text, "AI-Generated", "High", 0.9, comment="NA")
+    row = load_feedback(csv_path).iloc[0]
+    assert row["text"] == text and row["comment"] == "NA"
+    assert isinstance(row["text"], str)
+
+
+def test_feedback_empty_cells_still_missing(tmp_path: Path) -> None:
+    csv_path = str(tmp_path / "fb.csv")
+    save_feedback(csv_path, "text", "AI-Generated", "High", 0.9)
+    row = load_feedback(csv_path).iloc[0]
+    assert pd.isna(row["user_label"]) and pd.isna(row["comment"])
+    assert row["ai_probability"] == pytest.approx(0.9)
+
+
+def test_feedback_odd_characters(tmp_path: Path) -> None:
+    csv_path = str(tmp_path / "fb.csv")
+    save_feedback(csv_path, "a\x00b", "AI-Generated", "High", 0.5)
+    save_feedback(csv_path, "lone \ud800 surrogate", "AI-Generated", "High", 0.5)
+    save_feedback(csv_path, "line1\r\nline2\rline3​‮RTL", "x", "y", 0.5)
+    texts = load_feedback(csv_path)["text"].tolist()
+    assert texts == ["ab", "lone ? surrogate", "line1\r\nline2\rline3​‮RTL"]
+
+
+def test_feedback_concurrent_appends(tmp_path: Path) -> None:
+    csv_path = str(tmp_path / "fb.csv")
+    n = 16
+    barrier = threading.Barrier(n)
+
+    def write(i: int) -> None:
+        barrier.wait()
+        save_feedback(csv_path, f"text {i} " + "x" * 20_000, "AI-Generated", "High", 0.5)
+
+    threads = [threading.Thread(target=write, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    df = load_feedback(csv_path)
+    assert sorted(int(t.split()[1]) for t in df["text"]) == list(range(n))
+    assert list(df.columns) == FEEDBACK_COLUMNS
+
+
+def test_export_escapes_formulas_but_master_stays_raw(tmp_path: Path) -> None:
+    csv_path = str(tmp_path / "fb.csv")
+    payloads = ["=HYPERLINK(\"http://x\")", "+1", "-2", "@SUM(A1)", "\tx", "plain - text"]
+    for p in payloads:
+        save_feedback(csv_path, p, "AI-Generated", "High", 0.5, comment=p)
+    exported = pd.read_csv(export_feedback(csv_path, str(tmp_path / "out.csv")),
+                           keep_default_na=False)
+    expected = ["'" + p for p in payloads[:-1]] + ["plain - text"]
+    assert exported["text"].tolist() == expected
+    assert exported["comment"].tolist() == expected
+    assert load_feedback(csv_path)["text"].tolist() == payloads
+    raw = export_feedback(csv_path, str(tmp_path / "raw.csv"), escape_formulas=False)
+    assert load_feedback(raw)["text"].tolist() == payloads

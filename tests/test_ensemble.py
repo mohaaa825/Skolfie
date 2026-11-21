@@ -2,11 +2,15 @@
 test_ensemble.py
 -----------------
 End-to-end tests for AIDetectorModel: train on the synthetic seed texts,
-predict, and save/load round-trip.
+predict, and save/load round-trip; the out-of-fold Burrows' Delta rows that
+keep training labels from leaking into the ML features.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
 import pytest
 
 from skolfie.models.ensemble import AIDetectorModel
@@ -79,3 +83,46 @@ def test_predict_undoes_unicode_tricks(trained_model):
     assert result["ai_probability"] == pytest.approx(clean["ai_probability"])
     assert clean["obfuscation"] == {"invisible": 0, "lookalikes": 0}
     assert result["obfuscation"]["invisible"] > 0 and result["obfuscation"]["lookalikes"] > 0
+
+
+def test_burrows_training_features_do_not_leak_labels() -> None:
+    from sklearn.metrics import roc_auc_score
+
+    from skolfie.features.stylometric import tokenize_words
+
+    texts = HUMAN_TEXTS + AI_TEXTS
+    tokens = [tokenize_words(t) for t in texts]
+    rng = np.random.default_rng(0)
+    aucs = []
+    for seed in range(3):
+        noise = list(rng.permutation(["human"] * 25 + ["ai"] * 25))
+        rows = AIDetectorModel._oof_burrows_rows(tokens, noise, random_state=seed)
+        aucs.append(roc_auc_score([lab == "ai" for lab in noise], rows[:, 2]))
+    # In-sample scoring gave AUROC ~0.85 on pure-noise labels.
+    assert np.mean(aucs) < 0.7
+
+    real = ["human"] * 25 + ["ai"] * 25
+    rows = AIDetectorModel._oof_burrows_rows(tokens, real)
+    assert roc_auc_score([lab == "ai" for lab in real], rows[:, 2]) > 0.9
+
+
+def test_oof_rows_neutral_with_tiny_class() -> None:
+    rows = AIDetectorModel._oof_burrows_rows([["the", "a"]] * 3, ["human", "human", "ai"])
+    assert rows.tolist() == [[0.0, 0.0, 0.5]] * 3
+
+
+def test_save_is_atomic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from skolfie.models import ensemble
+
+    path = tmp_path / "model.joblib"
+    path.write_bytes(b"previous good model")
+
+    def broken_dump(obj, target):
+        Path(target).write_bytes(b"half")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(ensemble.joblib, "dump", broken_dump)
+    with pytest.raises(KeyboardInterrupt):
+        AIDetectorModel().save(str(path))
+    assert path.read_bytes() == b"previous good model"
+    assert [p.name for p in tmp_path.iterdir()] == ["model.joblib"]

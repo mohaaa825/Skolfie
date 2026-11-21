@@ -306,3 +306,8 @@ def test_style_matrix_empty():
 def test_style_matrix_accepts_tuple_and_generator():
     texts = ("One text here.", "Another one!")
     assert np.array_equal(style_matrix(texts), style_matrix(t for t in texts))
+
+
+def test_style_features_treat_nan_as_empty() -> None:
+    np.testing.assert_array_equal(style_features(float("nan")), style_features(""))
+

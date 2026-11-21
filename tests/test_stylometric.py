@@ -25,6 +25,9 @@ SHORT_TEXTS = [
     "one",
     "!!! ??? ...",
 ]
+# Non-English, emoji-only, invisible-only and very long inputs.
+ODD_TEXTS = ["​​", "😀😀😀", "!!!", "a", "مرحبا بالعالم",
+             "Привет, мир. Да!", "x" * 5000]
 
 CORE_FEATURES = {
     "word_count",
@@ -108,7 +111,7 @@ def test_custom_function_words_change_fw_features():
 # ---------------------------------------------------------------------------
 # Value sanity
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("text", SHORT_TEXTS)
+@pytest.mark.parametrize("text", SHORT_TEXTS + ODD_TEXTS)
 def test_all_values_finite_floats(extractor, text):
     feats = extractor.extract_features(text)
     assert all(isinstance(v, float) for v in feats.values())
@@ -231,3 +234,8 @@ def test_features_to_vector_reordering_permutes_values(extractor):
     forward = features_to_vector(feats, order)
     backward = features_to_vector(feats, order[::-1])
     np.testing.assert_array_equal(forward, backward[::-1])
+
+
+def test_fallback_tokenizer_keeps_unicode_words():
+    assert stylometric._simple_word_tokenize("naïve café Привет don't 42") == [
+        "naïve", "café", "Привет", "don't"]
