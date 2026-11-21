@@ -13,9 +13,8 @@ from skolfie.models.ensemble import AIDetectorModel
 from tests.fixtures.seed_texts import AI_TEXTS, HUMAN_TEXTS
 
 EXPECTED_KEYS = {
-    "label", "ai_probability", "human_probability", "confidence",
-    "ml_ai_probability", "burrows_ai_probability", "burrows_delta_human",
-    "burrows_delta_ai", "burrows_top_words", "top_features", "raw_features", "obfuscation",
+    "label", "ai_probability", "human_probability", "ml_ai_probability",
+    "burrows_ai_probability", "burrows_delta_human", "burrows_delta_ai", "obfuscation",
 }
 
 
@@ -44,13 +43,10 @@ def test_predict_result_shape(trained_model):
     result = trained_model.predict(AI_TEXTS[0])
     assert EXPECTED_KEYS <= set(result)
     assert result["label"] in {"AI-Generated", "Human-Written"}
-    assert result["confidence"] in {"High", "Medium", "Low"}
     for key in ("ai_probability", "human_probability", "ml_ai_probability",
                 "burrows_ai_probability"):
         assert 0.0 <= result[key] <= 1.0, key
     assert result["ai_probability"] + result["human_probability"] == pytest.approx(1.0)
-    assert len(result["burrows_top_words"]) <= 5
-    assert isinstance(result["top_features"], list)
 
 
 def test_predict_short_text_does_not_crash(trained_model):

@@ -352,8 +352,8 @@ class FeatureModel:
         """[{feature, importance}] sorted descending; importances sum to 1.
 
         LightGBM: total split gain per feature. Random forest: mean impurity
-        decrease. Both are global, model-internal measures; per-text
-        explanations (SHAP) come in roadmap step 8.
+        decrease. Both are global, model-internal measures; per-text SHAP
+        explanations are in `skolfie.explain.contributions`.
         """
         if self.clf is None:
             return []

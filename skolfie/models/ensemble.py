@@ -24,7 +24,11 @@ leaks its label, so the ML members learned to over-trust the Delta columns.
 train() and predict() map texts through
 `skolfie.robust.normalize.normalize_for_scoring` (invisible characters and
 look-alike letters undone); predict() also returns the `obfuscation_stats`
-of the text as given, which the app shows as a warning.
+of the text as given.
+
+This is the legacy model: the evaluation harness still scores it
+(`skolfie.models.baselines.AIDetectorAdapter`), but the app and the CLI run
+on `skolfie.service.Detector`.
 
 Saved models are joblib pickles: `load()` runs code from the file, so only
 load models you trained yourself, from a path you control.
@@ -66,36 +70,6 @@ ML_WEIGHT = 1.0 - BURROWS_WEIGHT
 BURROWS_N_WORDS = 60
 OOF_FOLDS = 5
 _NEUTRAL_BURROWS_ROW = (0.0, 0.0, 0.5)
-
-# Friendly display names for the more cryptic internal feature keys.
-_FRIENDLY_NAMES = {
-    "avg_sentence_length": "Average sentence length",
-    "sentence_length_std": "Sentence length variability",
-    "sentence_length_burstiness": "Sentence length burstiness",
-    "type_token_ratio": "Vocabulary diversity (type-token ratio)",
-    "hapax_legomena_ratio": "Rare-word usage (hapax legomena ratio)",
-    "yules_k": "Vocabulary richness (Yule's K)",
-    "punct_density": "Overall punctuation density",
-    "avg_word_length": "Average word length",
-    "avg_syllables_per_word": "Average syllables per word",
-    "flesch_reading_ease": "Flesch reading-ease score",
-    "burrows_ai_probability": "Burrows' Delta stylistic distance",
-    "burrows_delta_human": "Distance to human stylistic profile",
-    "burrows_delta_ai": "Distance to AI stylistic profile",
-    "noun_ratio": "Noun usage ratio",
-    "verb_ratio": "Verb usage ratio",
-    "adj_ratio": "Adjective usage ratio",
-    "adv_ratio": "Adverb usage ratio",
-    "pronoun_ratio": "Pronoun usage ratio",
-    "repeated_bigram_ratio": "Repeated phrase (bigram) ratio",
-    "stopword_ratio": "Stopword ratio",
-    "comma_ratio": "Comma usage rate",
-    "period_ratio": "Period usage rate",
-    "exclaim_ratio": "Exclamation mark usage rate",
-    "question_ratio": "Question mark usage rate",
-    "semicolon_ratio": "Semicolon usage rate",
-}
-
 
 class AIDetectorModel:
     """Ensemble AI-vs-Human text detector (Burrows' Delta + ML ensemble)."""
@@ -146,17 +120,15 @@ class AIDetectorModel:
         return rows
 
     def _build_feature_matrix(self, texts: List[str], fit: bool = False,
-                              stylo_dicts: Optional[List[Dict[str, float]]] = None,
                               burrows_rows: Optional[Sequence[Sequence[float]]] = None
                               ) -> np.ndarray:
         """
         Stylometric + Burrows' Delta + char n-gram TF-IDF matrix. Precomputed
-        `stylo_dicts` / `burrows_rows` (one per text) are used when given;
-        otherwise they are computed here, Delta with the fitted full model.
+        `burrows_rows` (one per text) are used when given; otherwise they are
+        computed here with the fitted full Delta model.
         """
         # 1. Stylometric feature dicts -> fixed-order numeric matrix
-        if stylo_dicts is None:
-            stylo_dicts = [self.feature_extractor.extract_features(t) for t in texts]
+        stylo_dicts = [self.feature_extractor.extract_features(t) for t in texts]
         if fit or not self.feature_names:
             self.feature_names = sorted(stylo_dicts[0].keys())
         stylo_matrix = np.vstack(
@@ -176,21 +148,6 @@ class AIDetectorModel:
             tfidf_matrix = self.tfidf.transform(texts).toarray()
 
         return np.hstack([stylo_matrix, burrows_matrix, tfidf_matrix])
-
-    def _all_feature_names(self) -> List[str]:
-        burrows_names = ["burrows_delta_human", "burrows_delta_ai", "burrows_ai_probability"]
-        tfidf_names = [f"char-pattern '{t}'" for t in self.tfidf.get_feature_names_out()]
-        return list(self.feature_names) + burrows_names + tfidf_names
-
-    @staticmethod
-    def _friendly_name(name: str) -> str:
-        if name.startswith("fw_"):
-            return f"frequency of the word '{name[3:]}'"
-        if name in _FRIENDLY_NAMES:
-            return _FRIENDLY_NAMES[name]
-        if name.startswith("char-pattern"):
-            return name
-        return name.replace("_", " ").capitalize()
 
     # -----------------------------------------------------------------
     # Training
@@ -230,8 +187,7 @@ class AIDetectorModel:
         self.is_trained = True
 
         # Quick self-eval on the training data. This is NOT a substitute for
-        # a held-out test set -- it's just a sanity-check number shown in
-        # the UI after retraining.
+        # a held-out test set, just a sanity-check number.
         preds = self.ensemble.predict(scaled)
         acc = float(np.mean(preds == np.array(labels)))
         return {"train_accuracy": acc, "n_samples": len(texts)}
@@ -249,13 +205,9 @@ class AIDetectorModel:
         text = normalize_for_scoring(text)
         tokens = tokenize_words(text)
         burrows_result = self.burrows_model.score(tokens)
-        raw_features = self.feature_extractor.extract_features(text)
-
-        combined = self._build_feature_matrix(
-            [text], stylo_dicts=[raw_features],
-            burrows_rows=[[burrows_result["delta_human"], burrows_result["delta_ai"],
-                           burrows_result["ai_probability"]]],
-        )
+        burrows_row = [burrows_result["delta_human"], burrows_result["delta_ai"],
+                       burrows_result["ai_probability"]]
+        combined = self._build_feature_matrix([text], burrows_rows=[burrows_row])
         scaled = self.scaler.transform(combined)
 
         ml_proba = self.ensemble.predict_proba(scaled)[0]
@@ -269,69 +221,16 @@ class AIDetectorModel:
         combined_ai_probability = float(np.clip(combined_ai_probability, 0.0, 1.0))
 
         label = "AI-Generated" if combined_ai_probability >= 0.5 else "Human-Written"
-        confidence = self._confidence_level(combined_ai_probability)
-
-        top_features = self._top_contributing_features(scaled[0])
-
-        per_word = burrows_result["per_word_diff"]
-        top_words = sorted(per_word.items(), key=lambda kv: abs(kv[1]), reverse=True)[:5]
-
         return {
             "label": label,
             "ai_probability": combined_ai_probability,
             "human_probability": 1.0 - combined_ai_probability,
-            "confidence": confidence,
             "ml_ai_probability": ml_ai_probability,
             "burrows_ai_probability": burrows_result["ai_probability"],
             "burrows_delta_human": burrows_result["delta_human"],
             "burrows_delta_ai": burrows_result["delta_ai"],
-            "burrows_top_words": top_words,
-            "top_features": top_features,
-            "raw_features": raw_features,
             "obfuscation": obfuscation,
         }
-
-    # -----------------------------------------------------------------
-    def _top_contributing_features(self, scaled_row: np.ndarray, top_k: int = 8) -> List[Dict]:
-        """
-        Approximate per-prediction feature contributions using the fitted
-        Random Forest's global feature importances, weighted by how far
-        this particular text's (scaled) feature value sits from the mean.
-        This is a lightweight explainability heuristic, not a formal
-        method like SHAP -- but it's fast and dependency-free, and good
-        enough to point users toward the features that mattered most.
-        """
-        try:
-            rf = self.ensemble.named_estimators_["rf"]
-            importances = rf.feature_importances_
-        except Exception:
-            return []
-
-        contributions = importances * np.abs(scaled_row)
-        names = self._all_feature_names()
-        idx_sorted = np.argsort(contributions)[::-1][:top_k]
-
-        results = []
-        for idx in idx_sorted:
-            if idx >= len(names):
-                continue
-            name = names[idx]
-            direction = "above average" if scaled_row[idx] > 0 else "below average"
-            results.append({
-                "feature": self._friendly_name(name),
-                "importance": float(contributions[idx]),
-                "direction": direction,
-            })
-        return results
-
-    @staticmethod
-    def _confidence_level(ai_probability: float) -> str:
-        distance = abs(ai_probability - 0.5)
-        if distance >= 0.35:
-            return "High"
-        elif distance >= 0.15:
-            return "Medium"
-        return "Low"
 
     # -----------------------------------------------------------------
     # Persistence
