@@ -23,6 +23,7 @@
   </script>
   <script src="config.js"></script>
   <script src="main.js" defer></script>
+  <script src="demo.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -58,48 +59,156 @@
         </div>
       </div>
 
-      <!-- Product mock-up -->
+      <!-- Product demo: live UI animation, driven by demo.js -->
       <div class="wrap">
-        <figure class="mock" data-reveal aria-label="Example of a Skolfie result">
+        <figure class="mock demo" data-reveal aria-labelledby="demo-title">
           <div class="mock__bar">
             <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-            <span class="mock__tab">Essay check · Year 9 English</span>
+            <span class="mock__tab" id="demo-title">How Skolfie works · 50-second demo</span>
           </div>
-          <div class="mock__body">
-            <aside class="mock__side">
-              <p class="mock__label">Class 9B</p>
-              <ul>
-                <li class="is-active">Climate essay <span class="tag tag--mixed">Mixed</span></li>
-                <li>The Great Gatsby <span class="tag tag--human">Human</span></li>
-                <li>Lab report <span class="tag tag--human">Human</span></li>
-                <li>Social media <span class="tag tag--ai">AI</span></li>
-                <li class="mock__new">+ New check</li>
-              </ul>
-            </aside>
-            <div class="mock__main">
-              <div class="verdict">
-                <div>
-                  <p class="mock__label">Verdict</p>
-                  <p class="verdict__value">Mixed</p>
+
+          <div class="demo__stage js-demo-stage" aria-hidden="true">
+            <!-- 1. Intro -->
+            <div class="scene scene--intro" data-scene="intro">
+              <p class="demo__serif">Is this essay really&nbsp;theirs?</p>
+            </div>
+
+            <!-- 2-7. The app -->
+            <div class="scene scene--app" data-scene="app" data-view="compose">
+              <aside class="app__side">
+                <p class="mock__label">Class 9B · English</p>
+                <ul>
+                  <li class="is-active">Maya L. · Climate essay</li>
+                  <li>Omar K. · Gatsby</li>
+                  <li>Ella S. · Lab report</li>
+                  <li>Noah B. · Social media</li>
+                  <li>Sara A. · School uniforms</li>
+                </ul>
+              </aside>
+              <div class="app__main">
+                <div class="app__top">
+                  <div class="seg">
+                    <span class="seg__btn js-seg-one is-on">One essay</span>
+                    <span class="seg__btn js-seg-folder">Class folder</span>
+                  </div>
                 </div>
-                <div class="meter" role="img" aria-label="AI likelihood 64 percent">
-                  <div class="meter__fill" style="--w:64%"></div>
+
+                <!-- Compose -->
+                <div class="view view--compose">
+                  <p class="app__title">Check an essay</p>
+                  <div class="composer js-composer">
+                    <p class="composer__ph">Paste a student's essay here…</p>
+                    <div class="composer__text">
+                      <p class="composer__meta">Maya L. · Climate essay · 412 words</p>
+                      <p>Last summer our town had the hottest week anyone could remember, and my grandma had to stay inside with the curtains shut. Climate change represents one of the most pressing challenges of our time, with far-reaching implications for ecosystems, economies and communities worldwide…</p>
+                    </div>
+                    <div class="composer__row">
+                                            <span class="pill pill--primary js-check">Check text</span>
+                    </div>
+                  </div>
                 </div>
-                <p class="verdict__pct"><span data-count="64">64</span>% AI-like</p>
+
+                <!-- Result -->
+                <div class="view view--result">
+                  <div class="result js-result">
+                    <div class="verdict">
+                      <div>
+                        <p class="mock__label">Verdict</p>
+                        <p class="verdict__value">Mixed</p>
+                        <p class="verdict__sub">Parts look AI-generated</p>
+                      </div>
+                      <div class="meter"><div class="meter__fill" style="--w:64%"></div></div>
+                      <p class="verdict__pct"><span class="js-pct">64</span>% AI likelihood</p>
+                    </div>
+                    <p class="mock__text">
+                      Last summer our town had the hottest week anyone could remember, and my grandma had to stay inside with the curtains shut.
+                      <mark class="js-mark">Climate change represents one of the most pressing challenges of our time, with far-reaching implications for ecosystems, economies and communities worldwide.</mark>
+                      I think people my age notice it more than adults think we do.
+                      <mark>Furthermore, addressing this multifaceted issue requires a comprehensive approach that balances innovation with sustainability.</mark>
+                    </p>
+                    <p class="tip">Reads like AI: very even rhythm, stock phrases</p>
+                    <p class="soon">Highlights: coming soon</p>
+                    <ul class="reasons js-reasons">
+                      <li><span class="chip chip--pink">Highlighted</span> Two passages read like AI text: very even sentence length, stock phrases.</li>
+                      <li><span class="chip chip--blue">Personal</span> The rest has personal detail and a varied rhythm, typical of student writing.</li>
+                    </ul>
+                    <div class="warn js-warn">
+                      <span class="warn__icon">!</span>
+                      <p><strong>Take extra care.</strong> Essays by English learners are flagged more often. Talk to the student and look at other evidence before acting.</p>
+                    </div>
+                  </div>
+                  <div class="scan"><span></span></div>
+                </div>
+
+                <!-- Class folder -->
+                <div class="view view--folder">
+                  <div class="folder__head">
+                    <p class="app__title">Class 9B · 28 essays</p>
+                    <p class="folder__count"><span class="js-count">0</span> of 28 checked</p>
+                  </div>
+                  <ul class="rows">
+                    <li><span>Maya L.</span><span class="rows__t">Climate essay</span><span class="tag tag--mixed">Mixed</span></li>
+                    <li><span>Omar K.</span><span class="rows__t">The Great Gatsby</span><span class="tag tag--human">Human</span></li>
+                    <li><span>Ella S.</span><span class="rows__t">Lab report</span><span class="tag tag--human">Human</span></li>
+                    <li><span>Noah B.</span><span class="rows__t">Social media</span><span class="tag tag--ai">AI</span></li>
+                    <li><span>Sara A.</span><span class="rows__t">School uniforms</span><span class="tag tag--unsure">Uncertain</span></li>
+                    <li><span>Liam P.</span><span class="rows__t">Book review</span><span class="tag tag--human">Human</span></li>
+                  </ul>
+                  <p class="rows__more">+ 22 more</p>
+                </div>
               </div>
-              <p class="mock__text">
-                Last summer our town had the hottest week anyone could remember, and my grandma had to stay inside with the curtains shut.
-                <mark>Climate change represents one of the most pressing challenges of our time, with far-reaching implications for ecosystems, economies and communities worldwide.</mark>
-                I think people my age notice it more than adults think we do.
-                <mark>Furthermore, addressing this multifaceted issue requires a comprehensive approach that balances innovation with sustainability.</mark>
-              </p>
-              <ul class="reasons">
-                <li><span class="chip chip--pink">Highlighted</span> Two passages read like AI text: very even sentence length, stock phrases.</li>
-                <li><span class="chip chip--blue">Personal</span> The rest has personal detail and a varied rhythm, typical of student writing.</li>
-              </ul>
+            </div>
+
+            <!-- 8. Accuracy -->
+            <div class="scene scene--card" data-scene="stat">
+              <div class="card-big">
+                <p class="card-big__value">1 in 585</p>
+                <p class="card-big__label">real student essays wrongly flagged in our Nov 2026 test (0.17%)</p>
+              </div>
+            </div>
+
+            <!-- 9. Privacy -->
+            <div class="scene scene--card" data-scene="privacy">
+              <div class="card-big card-big--list">
+                <p class="card-big__head">Never sent to third-party AI</p>
+                <ul class="ticks">
+                  <li>Checked by Skolfie's own models</li>
+                  <li>Never sent to ChatGPT or other AI services</li>
+                  <li>Moving to servers in the EU</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- 10. Fair use -->
+            <div class="scene scene--intro" data-scene="talk">
+              <p class="demo__serif">A reason to talk.<br>Not proof.</p>
+              <p class="demo__small">English essays only, for now.</p>
+            </div>
+
+            <div class="cursor js-cursor"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.6L10 19z"/></svg></div>
+            <p class="caption js-caption"></p>
+
+            <div class="demo__end">
+              <div class="demo__endbtns">
+                <button type="button" class="btn btn--ghost js-replay">↺ Watch again</button>
+                <a class="btn btn--primary js-app" href="#try">Check a text</a>
+              </div>
             </div>
           </div>
+
+          <div class="demo__controls">
+            <button type="button" class="demo__play js-play" aria-label="Play demo">
+              <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+              <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+            </button>
+            <div class="demo__track js-track" role="group" aria-label="Chapters"></div>
+            <p class="demo__time js-time" aria-hidden="true">Intro · 0:00 / 0:50</p>
+          </div>
+
+          <!-- Same story as text, for screen readers and as the content of the demo. -->
+          <ol class="sr js-transcript"></ol>
         </figure>
+        <p class="fine demo__note">Product demo with a made-up essay. Mixed highlights are being retrained for the newest AI models, EU hosting is being set up, and class-folder checks run in a notebook for now.</p>
       </div>
     </section>
 
