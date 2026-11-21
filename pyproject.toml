@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skolfie"
 version = "0.1.0"
-description = "Prototype AI-vs-human text detector combining stylometric features, Burrows' Delta and an ML ensemble."
+description = "AI-generated text detector for student essays: Human / Uncertain / AI / Mixed verdicts from a feature model, a transformer and a calibrated stacker, with reasons."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -26,7 +26,8 @@ skolfie = "skolfie.cli:main"
 # sentencepiece + protobuf: the DeBERTa-v3 tokenizer (a SentencePiece model) for the
 # transformer backbone; a pickled model reloads from its saved tokenizer.json.
 app = ["gradio>=4", "sentencepiece>=0.1.99", "protobuf>=3.20"]
-data = ["huggingface_hub>=0.20", "gdown>=5"]
+# requests: the theses loader harvests repositories over OAI-PMH.
+data = ["huggingface_hub>=0.20", "gdown>=5", "requests>=2.31"]
 generate = ["requests>=2.31", "google-genai>=1.30"]
 features = ["lightgbm>=4", "torch>=2.1", "transformers>=4.40", "sentencepiece>=0.1.99",
             "protobuf>=3.20"]
